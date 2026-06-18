@@ -536,8 +536,42 @@ ipcMain.on("close-settings", () => {
 
 function stopWindowMotion() {
   if (motionFrame) {
-    cancelAnimationFrame(motionFrame);
+    clearInterval(motionFrame);
     motionFrame = null;
+  }
+}
+
+function runMainProcessAnimation(durationMs, onFrame, onDone) {
+  const start = Date.now();
+  const fps = 60;
+  const intervalMs = 1000 / fps;
+
+  const timer = setInterval(() => {
+    const elapsed = Date.now() - start;
+    const t = Math.min(1, elapsed / durationMs);
+
+    try {
+      onFrame(t);
+    } catch (error) {
+      clearInterval(timer);
+      if (motionFrame === timer) motionFrame = null;
+      if (onDone) onDone(error);
+      return;
+    }
+
+    if (t >= 1) {
+      clearInterval(timer);
+      if (motionFrame === timer) motionFrame = null;
+      if (onDone) onDone(null);
+    }
+  }, intervalMs);
+
+  return timer;
+}
+
+function sendWindowMotionEnded(reason) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("window-motion-ended", reason);
   }
 }
 
@@ -545,12 +579,13 @@ function animateJump(height, duration) {
   stopWindowMotion();
 
   const bounds = mainWindow.getBounds();
-  const startedAt = Date.now();
   const peakRatio = 0.45;
 
-  function step() {
-    const elapsed = Date.now() - startedAt;
-    const progress = Math.min(elapsed / duration, 1);
+  motionFrame = runMainProcessAnimation(duration, (progress) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("main window destroyed during jump animation");
+    }
+
     let lift;
 
     if (progress < peakRatio) {
@@ -563,74 +598,62 @@ function animateJump(height, duration) {
 
     const y = Math.round(bounds.y - lift);
     mainWindow.setBounds(keepVisible({ x: bounds.x, y, width: bounds.width, height: bounds.height }));
-
-    if (progress >= 1) {
-      stopWindowMotion();
+  }, (error) => {
+    if (error) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setBounds(bounds);
       animateBounce(RELEASE_BOUNCE_HEIGHT, RELEASE_BOUNCE_DURATION_MS);
-      return;
     }
-
-    motionFrame = requestAnimationFrame(step);
-  }
-
-  step();
+  });
 }
 
 function animateBounce(height, duration) {
   stopWindowMotion();
 
   const bounds = mainWindow.getBounds();
-  const startedAt = Date.now();
 
-  function step() {
-    const elapsed = Date.now() - startedAt;
-    const progress = Math.min(elapsed / duration, 1);
+  motionFrame = runMainProcessAnimation(duration, (progress) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("main window destroyed during bounce animation");
+    }
+
     const bounce = Math.sin(progress * Math.PI * 2) * height * (1 - progress);
     const y = Math.round(bounds.y - bounce);
 
     mainWindow.setBounds(keepVisible({ x: bounds.x, y, width: bounds.width, height: bounds.height }));
-
-    if (progress >= 1) {
-      stopWindowMotion();
+  }, (error) => {
+    if (error) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setBounds(keepVisible(bounds));
-      return;
+      sendWindowMotionEnded("bounce");
     }
-
-    motionFrame = requestAnimationFrame(step);
-  }
-
-  step();
+  });
 }
 
 function animateRelease(fromBounds, toBounds, height, duration) {
   stopWindowMotion();
 
-  const startedAt = Date.now();
+  motionFrame = runMainProcessAnimation(duration, (progress) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("main window destroyed during release animation");
+    }
 
-  function step() {
-    const elapsed = Date.now() - startedAt;
-    const progress = Math.min(elapsed / duration, 1);
     const eased = easeOutCubic(progress);
     const bounce = Math.sin(progress * Math.PI * 2) * height * (1 - progress);
     const x = Math.round(fromBounds.x + (toBounds.x - fromBounds.x) * eased);
     const y = Math.round(fromBounds.y + (toBounds.y - fromBounds.y) * eased - bounce);
 
     mainWindow.setBounds(keepVisible({ x, y, width: toBounds.width, height: toBounds.height }));
-
-    if (progress >= 1) {
-      stopWindowMotion();
+  }, (error) => {
+    if (error) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setBounds(keepVisible(toBounds));
       saveCurrentWindowPosition();
       saveSettings();
       repositionChatBubble();
-      return;
+      sendWindowMotionEnded("release");
     }
-
-    motionFrame = requestAnimationFrame(step);
-  }
-
-  step();
+  });
 }
 
 function animateWalk(distance) {
@@ -643,29 +666,26 @@ function animateWalk(distance) {
     area.x - bounds.width + EDGE_MARGIN,
     area.x + area.width - EDGE_MARGIN
   );
-  const startedAt = Date.now();
 
-  function step() {
-    const elapsed = Date.now() - startedAt;
-    const progress = Math.min(elapsed / WALK_DURATION, 1);
+  motionFrame = runMainProcessAnimation(WALK_DURATION, (progress) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("main window destroyed during walk animation");
+    }
+
     const eased = easeInOutCubic(progress);
     const x = Math.round(bounds.x + (targetX - bounds.x) * eased);
 
     mainWindow.setBounds(keepVisible({ x, y: bounds.y, width: bounds.width, height: bounds.height }));
-
-    if (progress >= 1) {
-      stopWindowMotion();
+  }, (error) => {
+    if (error) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setBounds(keepVisible({ x: targetX, y: bounds.y, width: bounds.width, height: bounds.height }));
       saveCurrentWindowPosition();
       saveSettings();
       repositionChatBubble();
-      return;
+      sendWindowMotionEnded("walk");
     }
-
-    motionFrame = requestAnimationFrame(step);
-  }
-
-  step();
+  });
 }
 
 function easeOutCubic(progress) {
