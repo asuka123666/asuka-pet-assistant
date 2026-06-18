@@ -1,0 +1,32 @@
+node_modules/
+dist/
+*.log
+*.tmp
+*.bak
+*.old
+*.zip
+*.7z
+*.exe
+*.msi
+Thumbs.db
+desktop.ini
+
+# Local app data and generated scratch files
+pet-settings.json
+assets/archive/
+assets/generated/
+tools/archive/
+
+# Office temporary files
+~$*
+
+# Non-pet workspace material currently sharing this folder
+figs/
+office-inbox/
+office-outbox/
+output/
+_review_sheets/
+*.docx
+*.pdf
+gemini-auto-p-*
+tampermonkey-gemini-auto-p.user.js
