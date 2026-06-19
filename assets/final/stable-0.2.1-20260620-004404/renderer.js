@@ -95,61 +95,109 @@ const SPRITE_ROW_VISIBLE_ALPHA_THRESHOLD = 8;
 
 const PHRASES = {
   greeting: [
-    "\u4f60\u603b\u7b97\u6ce8\u610f\u5230\u6211\u4e86\uff1f",
-    "\u54fc\uff0c\u8fd9\u624d\u5bf9\u3002",
-    "\u627e\u6211\u6709\u4e8b\uff1f",
-    "\u522b\u78e8\u8e6d\uff0c\u8bf4\u5427\u3002"
+    "你总算注意到我了？",
+    "哼，这才对。",
+    "找我有事？",
+    "别磨蹭，说吧。",
+    "我可不是在等你。"
   ],
   poke: [
-    "\u4f60\u53c8\u6233\u6211\uff1f",
-    "\u522b\u4e00\u76f4\u70b9\uff0c\u7b28\u86cb\u3002",
-    "\u6211\u542c\u89c1\u4e86\uff0c\u4e0d\u7528\u70b9\u8fd9\u4e48\u591a\u6b21\u3002",
-    "\u6709\u4e8b\u5c31\u8bf4\u3002"
+    "你又戳我？",
+    "别一直点，笨蛋。",
+    "我听见了，不用点这么多次。",
+    "有事就说。"
   ],
   annoyed: [
-    "\u522b\u4e00\u76f4\u6233\u6211\uff0c\u7b28\u86cb\u3002",
-    "\u4f60\u5f88\u95f2\u5417\uff1f",
-    "\u591f\u4e86\uff0c\u70e6\u6b7b\u4e86\u3002",
-    "\u518d\u95f9\u6211\u53ef\u771f\u751f\u6c14\u4e86\u3002"
+    "别一直戳我，笨蛋。",
+    "你很闲吗？",
+    "够了，烦死了。",
+    "再闹我可真生气了。",
+    "别得寸进尺。"
   ],
   release: [
-    "\u4e0b\u6b21\u522b\u6293\u9886\u5b50\u3002",
-    "\u5dee\u70b9\u88ab\u4f60\u52d2\u6b7b\u3002",
-    "\u4f60\u771f\u662f\u591f\u7c97\u9c81\u7684\u3002",
-    "\u54fc\uff0c\u7b97\u4f60\u8bc6\u76f8\u3002"
+    "下次别抓领子。",
+    "差点被你勒死。",
+    "你真是够粗鲁的。",
+    "哼，算你识相。",
+    "再这样我真的生气了。"
   ],
   drag: [
-    "\u5582\uff01\u522b\u6293\u6211\u540e\u9886\uff01",
-    "\u653e\u5f00\u6211\u7684\u9886\u5b50\uff0c\u7b28\u86cb\uff01",
-    "\u8c01\u5141\u8bb8\u4f60\u4ece\u540e\u9762\u6293\u6211\u7684\uff1f",
-    "\u522b\u62ce\u7740\u6211\u8d70\uff01"
+    "喂！别抓我后领！",
+    "放开我的领子，笨蛋！",
+    "谁允许你从后面抓我的？",
+    "别拎着我走！",
+    "你把我当什么了？"
   ],
   lazy: [
-    "\u7a0d\u5fae\u4f11\u606f\u4e00\u4e0b\u4e0d\u884c\u5417\uff1f",
-    "\u522b\u50ac\uff0c\u6211\u5728\u601d\u8003\u3002",
-    "\u6211\u624d\u4e0d\u662f\u5728\u5077\u61d2\u3002"
+    "稍微休息一下不行吗？",
+    "别催，我在思考。",
+    "我才不是在偷懒。",
+    "现在是战术性休息。",
+    "你很闲吗？一直盯着我。"
   ],
   bored: [
-    "\u2026\u2026",
-    "\u597d\u65e0\u804a\u3002",
-    "\u4f60\u5012\u662f\u8bf4\u70b9\u4ec0\u4e48\u554a\u3002"
+    "……",
+    "好无聊。",
+    "你倒是说点什么啊。",
+    "就这样站着也太傻了。"
   ],
-  lookAround: ["\u4f60\u8fd9\u684c\u9762\u8fd8\u633a\u4e71\u7684\u3002"],
-  impatient: ["\u4f60\u628a\u6211\u53eb\u51fa\u6765\u5c31\u53ea\u662f\u770b\u7740\uff1f"],
-  longPress: ["\u6309\u591f\u4e86\u6ca1\u6709\uff1f", "\u4f60\u5230\u5e95\u60f3\u5e72\u561b\uff1f", "\u522b\u4e00\u76f4\u6309\u7740\u6211\u3002"],
-  held: ["\u6309\u591f\u4e86\u6ca1\u6709\uff1f", "\u4f60\u5230\u5e95\u60f3\u5e72\u561b\uff1f", "\u522b\u4e00\u76f4\u6309\u7740\u6211\u3002"],
-  drop: ["\u5dee\u70b9\u6454\u5230\u4e86\uff01", "\u4f60\u771f\u662f\u591f\u7c97\u9c81\u7684\u3002"],
-  lateNight: ["\u90fd\u51e0\u70b9\u4e86\uff0c\u4f60\u8fd8\u4e0d\u7761\uff1f", "\u6211\u8981\u7761\u4e86\uff0c\u522b\u5435\u3002", "\u660e\u5929\u518d\u8bf4\u3002"],
-  morning: ["\u65e9\u3002", "\u4f60\u603b\u7b97\u9192\u4e86\uff1f", "\u4eca\u5929\u4e5f\u8981\u52a0\u6cb9\uff0c\u7b28\u86cb\u3002"],
-  noon: ["\u4e2d\u5348\u4e86\uff0c\u5148\u5403\u996d\u3002", "\u522b\u7a7a\u7740\u809a\u5b50\u786c\u6491\u3002"],
-  afternoon: ["\u4e0b\u5348\u522b\u72af\u56f0\u3002", "\u8fd8\u6709\u4e8b\u6ca1\u505a\u5b8c\u5427\uff1f"],
-  evening: ["\u665a\u4e0a\u4e86\uff0c\u5dee\u4e0d\u591a\u6536\u6536\u5fc3\u3002", "\u522b\u628a\u4e8b\u60c5\u90fd\u62d6\u5230\u534a\u591c\u3002"],
-  reminder: ["\u5582\uff0c\u65f6\u95f4\u5230\u4e86\u3002", "\u4f60\u8ba9\u6211\u63d0\u9192\u7684\u4e8b\uff0c\u5230\u4e86\u3002"],
-  weatherRain: ["\u5916\u9762\u5728\u4e0b\u96e8\u5462\u3002", "\u522b\u5fd8\u4e86\u5e26\u4f1e\u3002"],
-  weatherCold: ["\u597d\u51b7\u3002", "\u4f60\u5c31\u4e0d\u80fd\u5f00\u4e2a\u6696\u6c14\uff1f"],
-  weatherHot: ["\u70ed\u6b7b\u4e86\u3002", "\u5f00\u7a7a\u8c03\u554a\u3002"],
-  weatherSnow: ["\u4e0b\u96ea\u4e86\u3002", "\u5916\u9762\u767d\u832b\u832b\u7684\u3002"],
-  weatherClear: ["\u5929\u6c14\u4e0d\u9519\u3002", "\u9002\u5408\u51fa\u95e8\u8d70\u8d70\u3002"]
+  lookAround: [
+    "你这桌面还挺乱的。"
+  ],
+  impatient: [
+    "你把我叫出来就只是看着？"
+  ],
+  longPress: [
+    "按够了没有？",
+    "你到底想干嘛？",
+    "别一直按着我。"
+  ],
+  held: [
+    "按够了没有？",
+    "你到底想干嘛？",
+    "别一直按着我。"
+  ],
+  drop: [
+    "差点摔到了！",
+    "你真是够粗鲁的。",
+    "别以为这样很好玩。"
+  ],
+  lateNight: [
+    "都几点了，你还不睡？",
+    "我要睡了，别吵。",
+    "明天再说。",
+    "你不困吗？"
+  ],
+  morning: [
+    "早。",
+    "你总算醒了？",
+    "今天也要加油，笨蛋。"
+  ],
+  weatherRain: [
+    "外面在下雨呢。",
+    "别忘了带伞。",
+    "下雨天最适合待着不动。"
+  ],
+  weatherCold: [
+    "好冷。",
+    "你就不能开个暖气？",
+    "冻死了。"
+  ],
+  weatherHot: [
+    "热死了。",
+    "开空调啊。",
+    "这种天气谁要动。"
+  ],
+  weatherSnow: [
+    "下雪了。",
+    "外面白茫茫的。",
+    "别出门了。"
+  ],
+  weatherClear: [
+    "天气不错。",
+    "适合出门走走。",
+    "倒是挺舒服的。"
+  ]
 };
 
 let speechBubbleEnabled = true;

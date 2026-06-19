@@ -16,10 +16,13 @@ const CELL_PADDING_X = 4;
 const CELL_PADDING_Y = 2;
 const BOTTOM_MARGIN_BY_ROW = [4, 4, 3, 5, 5, 5, 4];
 const ENABLE_DEFRINGE = true;
+const ENABLE_INTERNAL_HOLE_FILL = true;
 const DEFRINGE_RADIUS = 7;
 const DEFRINGE_EDGE_RADIUS = 4;
 const DEFRINGE_OPAQUE_ALPHA = 235;
 const DEFRINGE_EDGE_ALPHA_MAX = 248;
+const INTERNAL_HOLE_FILL_ROWS = new Set([0]);
+const INTERNAL_HOLE_MAX_AREA = 120;
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -413,6 +416,118 @@ function findNearbySolidColor(source, width, cellX, cellY, cellWidth, cellHeight
   return null;
 }
 
+function findNearbyFillColor(source, width, cellX, cellY, cellWidth, cellHeight, x, y) {
+  for (let radius = 1; radius <= DEFRINGE_RADIUS; radius += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= cellWidth || ny >= cellHeight) continue;
+
+        const i = pixelOffset(width, cellX + nx, cellY + ny);
+        const alpha = source[i + 3];
+        if (alpha < DEFRINGE_OPAQUE_ALPHA) continue;
+
+        return {
+          r: source[i],
+          g: source[i + 1],
+          b: source[i + 2]
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function collectInternalHole(source, width, cellX, cellY, cellWidth, cellHeight, exteriorMask, visited, startX, startY) {
+  const queue = [[startX, startY]];
+  const pixels = [];
+  visited[startY * cellWidth + startX] = 1;
+
+  for (let i = 0; i < queue.length; i += 1) {
+    const [x, y] = queue[i];
+    pixels.push([x, y]);
+
+    const neighbors = [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1]
+    ];
+
+    for (const [nx, ny] of neighbors) {
+      if (nx < 0 || ny < 0 || nx >= cellWidth || ny >= cellHeight) continue;
+      const localIndex = ny * cellWidth + nx;
+      if (visited[localIndex] || exteriorMask[localIndex]) continue;
+      const alpha = source[pixelOffset(width, cellX + nx, cellY + ny) + 3];
+      if (alpha > ALPHA_THRESHOLD) continue;
+      visited[localIndex] = 1;
+      queue.push([nx, ny]);
+    }
+  }
+
+  return pixels;
+}
+
+function shouldFillInternalHole(pixels) {
+  if (pixels.length > INTERNAL_HOLE_MAX_AREA) return false;
+  return true;
+}
+
+function fillInternalCellHoles(rgba, width, cellX, cellY, cellWidth, cellHeight) {
+  const source = Buffer.from(rgba);
+  const exteriorMask = makeExteriorMask(source, width, cellX, cellY, cellWidth, cellHeight);
+  const visited = new Uint8Array(cellWidth * cellHeight);
+  let filled = 0;
+
+  for (let y = 0; y < cellHeight; y += 1) {
+    for (let x = 0; x < cellWidth; x += 1) {
+      const localIndex = y * cellWidth + x;
+      if (visited[localIndex] || exteriorMask[localIndex]) continue;
+      const alpha = source[pixelOffset(width, cellX + x, cellY + y) + 3];
+      if (alpha > ALPHA_THRESHOLD) continue;
+
+      const pixels = collectInternalHole(source, width, cellX, cellY, cellWidth, cellHeight, exteriorMask, visited, x, y);
+      if (!shouldFillInternalHole(pixels)) continue;
+
+      for (const [px, py] of pixels) {
+        const color = findNearbyFillColor(source, width, cellX, cellY, cellWidth, cellHeight, px, py);
+        if (!color) continue;
+
+        const i = pixelOffset(width, cellX + px, cellY + py);
+        rgba[i] = color.r;
+        rgba[i + 1] = color.g;
+        rgba[i + 2] = color.b;
+        rgba[i + 3] = 255;
+        filled += 1;
+      }
+    }
+  }
+
+  return filled;
+}
+
+function fillInternalHoles(rgba, width) {
+  let filled = 0;
+  for (let row = 0; row < ROWS; row += 1) {
+    for (let column = 0; column < COLUMNS; column += 1) {
+      if (!INTERNAL_HOLE_FILL_ROWS.has(row)) continue;
+      filled += fillInternalCellHoles(
+        rgba,
+        width,
+        column * TARGET_FRAME_WIDTH,
+        row * TARGET_FRAME_HEIGHT,
+        TARGET_FRAME_WIDTH,
+        TARGET_FRAME_HEIGHT
+      );
+    }
+  }
+  return filled;
+}
+
 function defringeCellWhiteEdges(rgba, width, height, cellX, cellY, cellWidth, cellHeight) {
   const source = Buffer.from(rgba);
   const exteriorMask = makeExteriorMask(source, width, cellX, cellY, cellWidth, cellHeight);
@@ -507,6 +622,7 @@ function main() {
     }
   }
 
+  const filledPixels = ENABLE_INTERNAL_HOLE_FILL ? fillInternalHoles(output, outputWidth) : 0;
   const defringedPixels = ENABLE_DEFRINGE ? defringeWhiteEdges(output, outputWidth, outputHeight) : 0;
 
   fs.writeFileSync(OUTPUT_PATH, encodeRgbaPng(outputWidth, outputHeight, output));
@@ -519,6 +635,7 @@ function main() {
   console.log(`Output image:    ${outputWidth}x${outputHeight}`);
   console.log(`Output cell:     ${TARGET_FRAME_WIDTH}x${TARGET_FRAME_HEIGHT}`);
   console.log(`Copied frames:   ${copiedFrames}`);
+  console.log(`Filled holes:    ${filledPixels}`);
   console.log(`Defringed pixels:${defringedPixels}`);
   console.log("Output alpha:    yes, RGBA PNG");
   console.log(`Output:          ${OUTPUT_PATH}`);

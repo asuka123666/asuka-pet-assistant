@@ -1,0 +1,57 @@
+﻿{
+    "FinalDir":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217",
+    "Timestamp":  "20260619-144217",
+    "Files":  [
+                  {
+                      "Path":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217\\pet-spritesheet-extension-final-7rows.png",
+                      "Width":  1536,
+                      "Height":  1456,
+                      "PixelFormat":  "Format32bppArgb",
+                      "HasAlpha":  true,
+                      "Sha256":  "229D2995BA03332FA5A0C6CDF59B0D22029FFB941B33E9DED2F3D67E82BC48B4",
+                      "Length":  931457
+                  },
+                  {
+                      "Path":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217\\pet-spritesheet-final-16rows.png",
+                      "Width":  1536,
+                      "Height":  3328,
+                      "PixelFormat":  "Format32bppArgb",
+                      "HasAlpha":  true,
+                      "Sha256":  "E9A6B540D264B250E38908520B7374310A886906340FCD2A9B4F1E0D89D092B7",
+                      "Length":  3323607
+                  },
+                  {
+                      "Path":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217\\pet-spritesheet-generated-16rows.png",
+                      "Width":  1536,
+                      "Height":  3328,
+                      "PixelFormat":  "Format32bppArgb",
+                      "HasAlpha":  true,
+                      "Sha256":  "E9A6B540D264B250E38908520B7374310A886906340FCD2A9B4F1E0D89D092B7",
+                      "Length":  3323607
+                  },
+                  {
+                      "Path":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217\\pet-spritesheet-original-9rows-backup.png",
+                      "Width":  1536,
+                      "Height":  1872,
+                      "PixelFormat":  "Format32bppArgb",
+                      "HasAlpha":  true,
+                      "Sha256":  "739E9279415C5564F4F6D02FBEC98DBBCF9150B2D674FB311216A338EFEF0FE1",
+                      "Length":  2429695
+                  },
+                  {
+                      "Path":  "C:\\Users\\111\\Desktop\\123\\assets\\final\\sprite-current-20260619-144217\\sprite-final-key-rows-black-preview.png",
+                      "Width":  1536,
+                      "Height":  1872,
+                      "PixelFormat":  "Format32bppArgb",
+                      "HasAlpha":  true,
+                      "Sha256":  "6A7658D635B1BCB0E8F442AD8835AD6C09874C9D008707EDEE8C8651233A6CBC",
+                      "Length":  2059679
+                  }
+              ],
+    "MovedExperiments":  [
+                             "C:\\Users\\111\\Desktop\\123\\assets\\archive\\sprite-experiments\\grabbed-collar-repaired.png",
+                             "C:\\Users\\111\\Desktop\\123\\assets\\archive\\sprite-experiments\\grabbed-collar-repaired-black-preview.png",
+                             "C:\\Users\\111\\Desktop\\123\\assets\\archive\\sprite-experiments\\pet-spritesheet-extension-from-equal-cells.png",
+                             "C:\\Users\\111\\Desktop\\123\\assets\\archive\\sprite-experiments\\pet-spritesheet-extension-from-equal-cells-preview.png"
+                         ]
+}

@@ -23,7 +23,6 @@ let mainWindow;
 let menuWindow;
 let statusWindow;
 let settingsWindow = null;
-let reminderWindow = null;
 let speechBubbleWindow = null;
 let speechBubbleTimer = null;
 let chatBubbleWindow = null;
@@ -54,7 +53,6 @@ let statusTimer = null;
 let dragState = null;
 let motionFrame = null;
 let settings = null;
-const reminderTimers = new Set();
 
 function createWindow() {
   settings = loadSettings();
@@ -102,7 +100,6 @@ function createWindow() {
     closeChatBubble();
     closeWidget();
     closeSettingsWindow();
-    closeReminderWindow();
   });
   mainWindow.on("closed", () => {
     closeChatBubble();
@@ -128,8 +125,6 @@ app.on("before-quit", () => {
   closeChatBubble();
   closeWidget();
   closeSettingsWindow();
-  closeReminderWindow();
-  clearReminderTimers();
 });
 
 app.on("window-all-closed", () => {
@@ -221,10 +216,6 @@ ipcMain.on("control-menu-action", (_event, action) => {
     toggleSettingsWindow();
     return;
   }
-  if (action === "open-reminder") {
-    toggleReminderWindow();
-    return;
-  }
   if (action === "toggle-chat") {
     toggleChatBubble();
     return;
@@ -243,19 +234,6 @@ ipcMain.on("show-speech-bubble", (_event, text) => {
 
 ipcMain.on("close-speech-bubble", () => {
   closeSpeechBubble();
-});
-
-ipcMain.on("close-reminder", () => {
-  closeReminderWindow();
-});
-
-ipcMain.on("set-reminder", (_event, payload) => {
-  const minutes = Math.max(1, Math.min(24 * 60, Math.round(Number(payload?.minutes) || 0)));
-  const text = String(payload?.text || "").trim().slice(0, 60) || "休息一下";
-
-  scheduleReminder(text, minutes);
-  closeReminderWindow();
-  showStatusBubble(`提醒已设置：${minutes} 分钟`);
 });
 
 function buildChatCompletionsUrl(baseUrl) {
@@ -834,76 +812,6 @@ function closeSettingsWindow() {
   }
 }
 
-function toggleReminderWindow() {
-  if (reminderWindow && !reminderWindow.isDestroyed()) {
-    closeReminderWindow();
-    return;
-  }
-
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-
-  const width = 250;
-  const height = 220;
-  const petBounds = mainWindow.getBounds();
-  const display = screen.getDisplayMatching(petBounds);
-  const area = display.workArea;
-  const x = clamp(petBounds.x + petBounds.width + 8, area.x, area.x + area.width - width);
-  const y = clamp(petBounds.y, area.y, area.y + area.height - height);
-
-  reminderWindow = new BrowserWindow({
-    width,
-    height,
-    x,
-    y,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    hasShadow: false,
-    backgroundColor: "#00000000",
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-
-  reminderWindow.setAlwaysOnTop(true, "screen-saver");
-  reminderWindow.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(reminderHtml())}`);
-  reminderWindow.on("blur", closeReminderWindow);
-  reminderWindow.on("closed", () => {
-    reminderWindow = null;
-  });
-}
-
-function closeReminderWindow() {
-  if (reminderWindow && !reminderWindow.isDestroyed()) {
-    const win = reminderWindow;
-    reminderWindow = null;
-    win.close();
-  }
-}
-
-function scheduleReminder(text, minutes) {
-  const timer = setTimeout(() => {
-    reminderTimers.delete(timer);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) showPet();
-      showSpeechBubble(`提醒：${text}`);
-      showStatusBubble("提醒时间到了");
-      mainWindow.webContents.send("menu-action", "review");
-    }
-  }, minutes * 60 * 1000);
-
-  reminderTimers.add(timer);
-}
-
-function clearReminderTimers() {
-  for (const timer of reminderTimers) clearTimeout(timer);
-  reminderTimers.clear();
-}
-
 function resizeMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const scale = settings?.petScale ?? PET_SCALE;
@@ -921,85 +829,11 @@ function resizeMainWindow() {
 }
 
 function controlMenuHtml() {
-  const randomWalkState = settings?.randomWalkEnabled ? "?" : "?";
-  const quietModeState = settings?.quietMode ? "?" : "?";
+  const randomWalkState = settings?.randomWalkEnabled ? "开" : "关";
+  const quietModeState = settings?.quietMode ? "开" : "关";
   const randomWalkClass = settings?.randomWalkEnabled ? "enabled" : "";
   const quietModeClass = settings?.quietMode ? "enabled" : "";
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; color: #f8fafc; user-select: none; }
-    .menu { margin: 6px; padding: 10px; border-radius: 14px; background: linear-gradient(180deg, rgba(31, 34, 46, 0.96), rgba(13, 16, 25, 0.94)); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08); backdrop-filter: blur(12px); }
-    .menu-header { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 9px; }
-    .title { font-size: 13px; font-weight: 700; letter-spacing: 0; }
-    .subtitle { margin-top: 2px; color: rgba(226, 232, 240, 0.58); font-size: 10px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 999px; background: #f87171; box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12); }
-    .section-title { margin: 7px 2px 5px; color: rgba(226, 232, 240, 0.58); font-size: 10px; font-weight: 700; letter-spacing: 0; }
-    .divider { height: 1px; margin: 8px 2px 7px; background: rgba(255, 255, 255, 0.12); }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    .stack { display: grid; gap: 6px; }
-    button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 29px; margin: 0; padding: 0 9px; border: 1px solid transparent; border-radius: 9px; background: rgba(255, 255, 255, 0.055); color: inherit; text-align: left; font-size: 12px; line-height: 1.2; cursor: pointer; outline: none; transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
-    button:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.12); }
-    button.clicked { background: rgba(255, 255, 255, 0.22); transform: translateY(1px); }
-    button.enabled { background: rgba(34, 197, 94, 0.18); border-color: rgba(74, 222, 128, 0.3); color: #bbf7d0; }
-    button.enabled:hover { background: rgba(34, 197, 94, 0.27); }
-    .label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .switch-pill { flex: 0 0 auto; margin-left: 8px; padding: 2px 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.09); color: rgba(226, 232, 240, 0.72); font-size: 10px; line-height: 1.2; }
-    button.enabled .switch-pill { background: rgba(74, 222, 128, 0.18); color: #dcfce7; }
-    button.danger { color: #fecaca; background: rgba(248, 113, 113, 0.08); }
-    button.danger:hover { background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.22); }
-  </style>
-</head>
-<body>
-  <div class="menu">
-    <div class="menu-header"><div><div class="title">桌宠菜单</div><div class="subtitle">Asuka Pet Assistant</div></div><span class="status-dot"></span></div>
-    <div class="section-title">动作</div>
-    <div class="grid">
-      <button data-action="wave"><span class="label">挥手</span></button>
-      <button data-action="jump"><span class="label">跳一下</span></button>
-      <button data-action="review"><span class="label">查看</span></button>
-      <button data-action="failed"><span class="label">生气</span></button>
-      <button data-action="walk-left"><span class="label">向左走</span></button>
-      <button data-action="walk-right"><span class="label">向右走</span></button>
-    </div>
-    <div class="section-title">状态</div>
-    <div class="stack">
-      <button class="${randomWalkClass}" data-action="toggle-random-walk"><span class="label">随机走动</span><span class="switch-pill">${randomWalkState}</span></button>
-      <button class="${quietModeClass}" data-action="quiet-mode"><span class="label">安静模式</span><span class="switch-pill">${quietModeState}</span></button>
-    </div>
-    <div class="section-title">工具</div>
-    <div class="stack">
-      <button data-action="open-reminder"><span class="label">提醒我</span></button>
-      <button data-action="open-settings"><span class="label">设置</span></button>
-      <button data-action="toggle-chat"><span class="label">对话</span></button>
-      <button data-action="toggle-widget"><span class="label">小组件</span></button>
-      <button data-action="hide-to-tray"><span class="label">隐藏到托盘</span></button>
-    </div>
-    <div class="divider"></div>
-    <button class="danger" data-action="exit"><span class="label">退出</span></button>
-  </div>
-  <script>
-    const { ipcRenderer } = require("electron");
-    document.addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (!button) return;
-      const action = button.getAttribute("data-action");
-      if (!action) return;
-      button.classList.add("clicked");
-      setTimeout(() => { ipcRenderer.send("control-menu-action", action); }, 100);
-    });
-    document.addEventListener("contextmenu", (event) => event.preventDefault());
-  </script>
-</body>
-</html>`;
-}
-
-function reminderHtml() {
   return `
 <!DOCTYPE html>
 <html>
@@ -1017,63 +851,182 @@ function reminderHtml() {
       color: #f8fafc;
       user-select: none;
     }
-    .panel {
+    .menu {
       margin: 6px;
-      padding: 12px;
+      padding: 10px;
       border-radius: 14px;
-      background: linear-gradient(180deg, rgba(31, 34, 46, 0.96), rgba(13, 16, 25, 0.94));
+      background:
+        linear-gradient(180deg, rgba(31, 34, 46, 0.96), rgba(13, 16, 25, 0.94));
       border: 1px solid rgba(255, 255, 255, 0.16);
-      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      box-shadow:
+        0 16px 34px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
       backdrop-filter: blur(12px);
     }
-    .title { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
-    label { display: block; margin: 8px 0 5px; color: rgba(226, 232, 240, 0.72); font-size: 11px; font-weight: 700; }
-    input {
-      width: 100%;
-      height: 30px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 9px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #f8fafc;
-      padding: 0 9px;
-      outline: none;
-      font-size: 12px;
+    .menu-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 2px 9px;
     }
-    input:focus { border-color: rgba(248, 113, 113, 0.45); background: rgba(255, 255, 255, 0.11); }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-    button { height: 30px; border: 1px solid transparent; border-radius: 9px; color: #f8fafc; background: rgba(255, 255, 255, 0.08); cursor: pointer; font-size: 12px; }
-    button:hover { background: rgba(255, 255, 255, 0.14); }
-    .primary { background: rgba(248, 113, 113, 0.28); border-color: rgba(248, 113, 113, 0.3); }
-    .primary:hover { background: rgba(248, 113, 113, 0.36); }
+    .title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin-top: 2px;
+      color: rgba(226, 232, 240, 0.58);
+      font-size: 10px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #f87171;
+      box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12);
+    }
+    .section-title {
+      margin: 7px 2px 5px;
+      color: rgba(226, 232, 240, 0.58);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .divider {
+      height: 1px;
+      margin: 8px 2px 7px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 29px;
+      margin: 0;
+      padding: 0 9px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.055);
+      color: inherit;
+      text-align: left;
+      font-size: 12px;
+      line-height: 1.2;
+      cursor: pointer;
+      outline: none;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    .stack {
+      display: grid;
+      gap: 6px;
+    }
+    button:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    button.clicked {
+      background: rgba(255, 255, 255, 0.22);
+      transform: translateY(1px);
+    }
+    button.enabled {
+      background: rgba(34, 197, 94, 0.18);
+      border-color: rgba(74, 222, 128, 0.3);
+      color: #bbf7d0;
+    }
+    button.enabled:hover {
+      background: rgba(34, 197, 94, 0.27);
+    }
+    .label {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .hint,
+    .switch-pill {
+      flex: 0 0 auto;
+      margin-left: 8px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.09);
+      color: rgba(226, 232, 240, 0.72);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+    button.enabled .switch-pill {
+      background: rgba(74, 222, 128, 0.18);
+      color: #dcfce7;
+    }
+    button.danger {
+      color: #fecaca;
+      background: rgba(248, 113, 113, 0.08);
+    }
+    button.danger:hover {
+      background: rgba(248, 113, 113, 0.18);
+      border-color: rgba(248, 113, 113, 0.22);
+    }
   </style>
 </head>
 <body>
-  <div class="panel">
-    <div class="title">提醒我</div>
-    <label for="text">内容</label>
-    <input id="text" maxlength="60" value="休息一下">
-    <label for="minutes">多久以后</label>
-    <input id="minutes" type="number" min="1" max="1440" value="30">
-    <div class="row">
-      <button id="cancel">取消</button>
-      <button id="ok" class="primary">设置</button>
+  <div class="menu">
+    <div class="menu-header">
+      <div>
+        <div class="title">桌宠菜单</div>
+        <div class="subtitle">Asuka Pet Assistant</div>
+      </div>
+      <span class="status-dot"></span>
     </div>
+
+    <div class="section-title">动作</div>
+    <div class="grid">
+      <button data-action="wave"><span class="label">挥手</span></button>
+      <button data-action="jump"><span class="label">跳一下</span></button>
+      <button data-action="review"><span class="label">查看</span></button>
+      <button data-action="failed"><span class="label">生气</span></button>
+      <button data-action="walk-left"><span class="label">向左走</span></button>
+      <button data-action="walk-right"><span class="label">向右走</span></button>
+    </div>
+
+    <div class="section-title">状态</div>
+    <div class="stack">
+      <button class="${randomWalkClass}" data-action="toggle-random-walk">
+        <span class="label">随机走动</span>
+        <span class="switch-pill">${randomWalkState}</span>
+      </button>
+      <button class="${quietModeClass}" data-action="quiet-mode">
+        <span class="label">安静模式</span>
+        <span class="switch-pill">${quietModeState}</span>
+      </button>
+    </div>
+
+    <div class="section-title">工具</div>
+    <div class="stack">
+      <button data-action="open-settings"><span class="label">设置</span></button>
+      <button data-action="toggle-chat"><span class="label">对话</span></button>
+      <button data-action="toggle-widget"><span class="label">小组件</span></button>
+      <button data-action="hide-to-tray"><span class="label">隐藏到托盘</span></button>
+    </div>
+    <div class="divider"></div>
+    <button class="danger" data-action="exit"><span class="label">退出</span></button>
   </div>
   <script>
     const { ipcRenderer } = require("electron");
-    const text = document.getElementById("text");
-    const minutes = document.getElementById("minutes");
-    document.getElementById("ok").addEventListener("click", () => {
-      ipcRenderer.send("set-reminder", { text: text.value, minutes: minutes.value });
-    });
-    document.getElementById("cancel").addEventListener("click", () => ipcRenderer.send("close-reminder"));
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") ipcRenderer.send("set-reminder", { text: text.value, minutes: minutes.value });
-      if (event.key === "Escape") ipcRenderer.send("close-reminder");
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      const action = button.getAttribute("data-action");
+      if (!action) return;
+      button.classList.add("clicked");
+      setTimeout(() => {
+        ipcRenderer.send("control-menu-action", action);
+      }, 100);
     });
     document.addEventListener("contextmenu", (event) => event.preventDefault());
-    text.focus();
-    text.select();
   </script>
 </body>
 </html>`;
@@ -1562,8 +1515,6 @@ function cleanExit() {
   closeChatBubble();
   closeWidget();
   closeSettingsWindow();
-  closeReminderWindow();
-  clearReminderTimers();
   if (tray) {
     tray.destroy();
     tray = null;
@@ -2494,12 +2445,6 @@ function getTimeContext() {
     timePhrase = "lateNight";
   } else if (hour >= 6 && hour < 9) {
     timePhrase = "morning";
-  } else if (hour >= 11 && hour < 14) {
-    timePhrase = "noon";
-  } else if (hour >= 14 && hour < 18) {
-    timePhrase = "afternoon";
-  } else if (hour >= 18 && hour < 23) {
-    timePhrase = "evening";
   }
 
   return { hour, isLateNight, timePhrase };
