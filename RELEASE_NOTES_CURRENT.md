@@ -1,36 +1,16 @@
-# Asuka Pet Assistant - Current Stable Snapshot
+# Asuka Pet Assistant - Current Preview Snapshot
 
-Date: 2026-06-19
-Version: 0.2.0
+Date: 2026-06-20
+Version: 0.4.0 Preview
 
-## Stable Sprite Snapshot
+## Highlights
 
-Current accepted sprite snapshot:
-
-`assets/final/sprite-current-20260619-144217`
-
-Active runtime sprite:
-
-`pet-spritesheet.png`
-
-The active runtime sprite matches:
-
-`assets/final/sprite-current-20260619-144217/pet-spritesheet-final-16rows.png`
-
-## Current Behavior
-
-- Transparent frameless always-on-top desktop pet window.
-- Tray menu supports show, hide, random walk toggle, quiet mode toggle, startup toggle, and exit.
-- Settings persist through `pet-settings.json` under Electron `userData`.
-- Click plays waving.
-- Double-click plays jumping.
-- Rapid clicks trigger failed.
-- Hold or drag starts collar-drag behavior.
-- Collar drag uses A/B random variants.
-- Drag release returns through bounce/recovery.
-- Review action uses revised 5-frame row with the abrupt waist-twist frame removed.
-- Failed action holds the folded-arms pose for about 1 second.
-- Idle and waving are visually scaled to 0.97 for smoother transitions.
+- Embedded a compact resource card directly under the desktop pet.
+- Shows CPU, memory, and system disk usage with live percentage bars.
+- Resource pressure can affect the emotion system and occasionally trigger pet dialogue.
+- Added Settings and tray menu toggles for the resource card.
+- Main pet window now resizes automatically when the resource card is enabled or disabled.
+- Keeps the existing desktop pet interactions, AI chat entry, reminders, tray controls, and portable build flow.
 
 ## Build Command
 
@@ -40,27 +20,17 @@ npm.cmd run build
 
 Expected output:
 
-`dist/Asuka Pet Assistant-0.2.0-portable.exe`
-
-Current build output:
-
-- File: `dist/Asuka Pet Assistant-0.2.0-portable.exe`
-- Size: `274854730` bytes
-- SHA-256: `D247CB99804BF18B1232DBDAD4D8F1E870A24B5809CA7DA98CD2BC12664B5B49`
-- Built at: 2026-06-19 15:11
+`dist/Asuka Pet Assistant-0.4.0-portable.exe`
 
 ## Quick Smoke Test
 
-- Launch portable exe.
-- Single click: waving.
-- Double click: jumping.
-- Rapid click: failed.
-- Hold or drag: collar drag animation.
-- Right-click menu: review, failed, walk, hide to tray, exit.
-- Tray menu: show, hide, toggles, exit.
+- Launch the app and confirm the resource card appears below the pet.
+- Confirm CPU, MEM, and DSK percentages update every few seconds.
+- Toggle the resource card from Settings and from the tray menu.
+- Single click, double click, drag, right-click menu, chat entry, and reminders still work.
 
 ## Notes
 
-- Current waving row is restored to the original artwork, with playback repeating the middle raised-hand frames.
-- Experimental sprite files are archived under `assets/archive/sprite-experiments`.
-- No AI chat UI redesign or packaging configuration changes are part of this snapshot.
+- This is still a preview build.
+- AI chat requires user-configured API settings.
+- The embedded resource card reads local system data only and does not require network access.

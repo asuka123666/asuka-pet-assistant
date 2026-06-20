@@ -1,4 +1,6 @@
 const { ipcRenderer } = require("electron");
+const fs = require("fs");
+const os = require("os");
 
 const CELL_WIDTH = 192;
 const CELL_HEIGHT = 208;
@@ -11,6 +13,13 @@ const DRAG_THRESHOLD_PX = 5;
 const LONG_PRESS_MS = 600;
 const RAPID_CLICK_COUNT = 4;
 const RAPID_CLICK_WINDOW_MS = 2000;
+const HEAD_HIT_ZONE_TOP = 0.06;
+const HEAD_HIT_ZONE_BOTTOM = 0.48;
+const HEAD_HIT_ZONE_LEFT = 0.18;
+const HEAD_HIT_ZONE_RIGHT = 0.82;
+const BODY_HIT_ZONE_TOP = 0.42;
+const PROXIMITY_LOOK_DURATION_MS = 650;
+const EDGE_REACTION_IDLE_BLOCK_MS = 1800;
 
 const BLINK_MODE_MAP = {
   low:    { min: 6000, max: 9000 },
@@ -22,6 +31,9 @@ let idleBlinkMaxMs = 7000;
 const RANDOM_IDLE_MIN_MS = 45000;
 const RANDOM_IDLE_MAX_MS = 90000;
 const RANDOM_IDLE_AFTER_ACTION_MS = 10000;
+const RESOURCE_UPDATE_MS = 1200;
+const RESOURCE_PRESSURE_THRESHOLD = 88;
+const DISK_ROOT = process.platform === "win32" ? `${process.env.SystemDrive || "C:"}\\` : "/";
 
 const ENABLE_RANDOM_WALK_DEFAULT = false;
 const RANDOM_WALK_MIN_MS = 30000;
@@ -50,7 +62,14 @@ const ACTION_TIMING = {
   lazySit:       { anticipationMs: 0, recoveryMs: 150 },
   doze:          { anticipationMs: 0, recoveryMs: 150 },
   pokeAnnoyed:   { anticipationMs: 0, recoveryMs: 120 },
-  stretch:       { anticipationMs: 0, recoveryMs: 150 }
+  stretch:       { anticipationMs: 0, recoveryMs: 150 },
+  headPat:       { anticipationMs: 0, recoveryMs: 140 },
+  pokeFuss:      { anticipationMs: 0, recoveryMs: 180 },
+  proximityLook: { anticipationMs: 0, recoveryMs: 120 },
+  edgePeek:      { anticipationMs: 0, recoveryMs: 160 },
+  bottomSit:     { anticipationMs: 0, recoveryMs: 180 },
+  sleepWake:     { anticipationMs: 0, recoveryMs: 180 },
+  happyNod:      { anticipationMs: 0, recoveryMs: 150 }
 };
 const JUMP_ANTICIPATION_MS = 120;
 const JUMP_RECOVERY_MS = 220;
@@ -99,6 +118,12 @@ const PHRASES = {
     "\u54fc\uff0c\u8fd9\u624d\u5bf9\u3002",
     "\u627e\u6211\u6709\u4e8b\uff1f",
     "\u522b\u78e8\u8e6d\uff0c\u8bf4\u5427\u3002"
+  ],
+  headPat: [
+    "\u522b\u4e71\u6478\u6211\u5934\u53d1\u3002",
+    "\u54fc\u2026\u2026\u53ea\u80fd\u4e00\u4e0b\u3002",
+    "\u4f60\u8fd8\u633a\u4f1a\u627e\u5730\u65b9\u7684\u3002",
+    "\u522b\u628a\u5934\u53d1\u5f04\u4e71\u4e86\u3002"
   ],
   poke: [
     "\u4f60\u53c8\u6233\u6211\uff1f",
@@ -149,7 +174,8 @@ const PHRASES = {
   weatherCold: ["\u597d\u51b7\u3002", "\u4f60\u5c31\u4e0d\u80fd\u5f00\u4e2a\u6696\u6c14\uff1f"],
   weatherHot: ["\u70ed\u6b7b\u4e86\u3002", "\u5f00\u7a7a\u8c03\u554a\u3002"],
   weatherSnow: ["\u4e0b\u96ea\u4e86\u3002", "\u5916\u9762\u767d\u832b\u832b\u7684\u3002"],
-  weatherClear: ["\u5929\u6c14\u4e0d\u9519\u3002", "\u9002\u5408\u51fa\u95e8\u8d70\u8d70\u3002"]
+  weatherClear: ["\u5929\u6c14\u4e0d\u9519\u3002", "\u9002\u5408\u51fa\u95e8\u8d70\u8d70\u3002"],
+  resourcePressure: ["电脑有点吃紧，先少开几个东西。", "占用太高了，你又在跑什么？", "我都感觉桌面变重了。"]
 };
 
 let speechBubbleEnabled = true;
@@ -308,7 +334,14 @@ const animations = {
   lazySit: { row: -1, frames: 6, fps: 5, holdLastMs: 180, fallback: "lazyIdle" },
   doze: { row: -1, frames: 6, fps: 2.5, holdLastMs: 180, fallback: "dozeIdle" },
   pokeAnnoyed: { row: -1, frames: 4, fps: 6.25, holdLastMs: 140, fallback: "failed" },
-  stretch: { row: -1, frames: 6, fps: 5.5, holdLastMs: 160, fallback: "stretchIdle" }
+  stretch: { row: -1, frames: 6, fps: 5.5, holdLastMs: 160, fallback: "stretchIdle" },
+  headPat: { row: 16, frames: 6, fps: 5.5, holdLastMs: 180, fallback: "idle" },
+  pokeFuss: { row: 17, frames: 6, fps: 6, holdLastMs: 220, fallback: "pokeAnnoyed" },
+  proximityLook: { row: 18, frames: 6, fps: 4.5, holdLastMs: 260, fallback: "idle" },
+  edgePeek: { row: 19, frames: 6, fps: 5, holdLastMs: 220, fallback: "waiting" },
+  bottomSit: { row: 20, frames: 6, fps: 4, holdLastMs: 500, fallback: "lazySit" },
+  sleepWake: { row: 21, frames: 8, fps: 3, holdLastMs: 240, fallback: "doze" },
+  happyNod: { row: 22, frames: 6, fps: 5, holdLastMs: 240, fallback: "review" }
 };
 
 const ACTION_VISUAL_SCALE = {
@@ -329,7 +362,14 @@ const ACTION_VISUAL_SCALE = {
   lazySit: 1.04,
   doze: 1.04,
   pokeAnnoyed: 1.04,
-  stretch: 1.04
+  stretch: 1.04,
+  headPat: 1.04,
+  pokeFuss: 1.04,
+  proximityLook: 1.04,
+  edgePeek: 1.04,
+  bottomSit: 1.04,
+  sleepWake: 1.04,
+  happyNod: 1.04
 };
 
 const priority = {
@@ -345,6 +385,21 @@ const priority = {
 };
 
 const pet = document.getElementById("pet");
+const resourceDock = document.getElementById("resource-dock");
+const resourceEls = {
+  cpu: {
+    value: document.getElementById("resource-cpu"),
+    bar: document.getElementById("resource-cpu-bar")
+  },
+  mem: {
+    value: document.getElementById("resource-mem"),
+    bar: document.getElementById("resource-mem-bar")
+  },
+  disk: {
+    value: document.getElementById("resource-disk"),
+    bar: document.getElementById("resource-disk-bar")
+  }
+};
 
 let active = { name: "idle", priority: priority.idle };
 let animationTimer = null;
@@ -363,6 +418,7 @@ let nextAmbientAllowedAt = 0;
 let lastMenuActionAt = 0;
 let nextDragSpeechAllowedAt = 0;
 let recentClicks = [];
+let recentHeadClicks = [];
 let availableSpriteRows = DEFAULT_SPRITE_ROWS;
 let spriteRowHasContent = null;
 const missingAnimationWarnings = new Set();
@@ -373,6 +429,10 @@ let currentSpriteTransform = { x: 0, y: 0, rotate: 0, scaleX: 1, scaleY: 1 };
 let randomWalkEnabled = ENABLE_RANDOM_WALK_DEFAULT;
 let randomIdleEnabled = false;
 let quietMode = false;
+let resourceDockEnabled = true;
+let resourceTimer = null;
+let lastCpuSnapshot = getCpuSnapshot();
+let resourcePressureSpeechAt = 0;
 
 let pointerDown = false;
 let dragging = false;
@@ -384,6 +444,97 @@ let dragStart = { x: 0, y: 0 };
 let dragStartedAt = 0;
 let dragMaxDistance = 0;
 let activeDragSet = null;
+
+function getCpuSnapshot() {
+  const cpus = os.cpus();
+  return cpus.reduce((snapshot, cpu) => {
+    const total = Object.values(cpu.times).reduce((sum, value) => sum + value, 0);
+    snapshot.idle += cpu.times.idle;
+    snapshot.total += total;
+    return snapshot;
+  }, { idle: 0, total: 0 });
+}
+
+function getCpuPercent() {
+  const next = getCpuSnapshot();
+  const idleDelta = next.idle - lastCpuSnapshot.idle;
+  const totalDelta = next.total - lastCpuSnapshot.total;
+  lastCpuSnapshot = next;
+  if (totalDelta <= 0) return null;
+  return clampPercent(100 - (idleDelta / totalDelta) * 100);
+}
+
+function getMemoryPercent() {
+  const total = os.totalmem();
+  if (!total) return null;
+  return clampPercent(((total - os.freemem()) / total) * 100);
+}
+
+function getDiskPercent() {
+  try {
+    const stat = fs.statfsSync(DISK_ROOT);
+    const total = Number(stat.blocks) * Number(stat.bsize);
+    const free = Number(stat.bfree) * Number(stat.bsize);
+    if (!total) return null;
+    return clampPercent(((total - free) / total) * 100);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function resourceColor(value) {
+  if (value == null) return "#64748b";
+  if (value >= 90) return "#f87171";
+  if (value >= 75) return "#fbbf24";
+  return "#58c3a5";
+}
+
+function setResourceMetric(metric, value) {
+  const target = resourceEls[metric];
+  if (!target?.value || !target?.bar) return;
+  const percent = value == null ? 0 : value;
+  target.value.textContent = value == null ? "--%" : `${value}%`;
+  target.bar.style.setProperty("--bar-value", `${percent}%`);
+  target.bar.style.setProperty("--bar-color", resourceColor(value));
+}
+
+function updateResourceDock() {
+  if (!resourceDockEnabled) return;
+
+  const cpu = getCpuPercent();
+  const mem = getMemoryPercent();
+  const disk = getDiskPercent();
+  setResourceMetric("cpu", cpu);
+  setResourceMetric("mem", mem);
+  setResourceMetric("disk", disk);
+
+  const pressure = Math.max(cpu ?? 0, mem ?? 0, disk ?? 0);
+  if (pressure >= RESOURCE_PRESSURE_THRESHOLD) {
+    mood = clampEmotion(mood - 1);
+    energy = clampEmotion(energy - 1, 0, 100);
+    if (Date.now() - resourcePressureSpeechAt > 30000) {
+      resourcePressureSpeechAt = Date.now();
+      showSpeech("resourcePressure");
+    }
+  }
+}
+
+function syncResourceDock() {
+  if (!resourceDock) return;
+  resourceDock.classList.toggle("is-hidden", !resourceDockEnabled);
+  if (resourceDockEnabled && !resourceTimer) {
+    lastCpuSnapshot = getCpuSnapshot();
+    updateResourceDock();
+    resourceTimer = setInterval(updateResourceDock, RESOURCE_UPDATE_MS);
+  } else if (!resourceDockEnabled && resourceTimer) {
+    clearInterval(resourceTimer);
+    resourceTimer = null;
+  }
+}
 
 function debugLog(...args) {
   if (DEBUG_STATE) console.log("[pet]", ...args);
@@ -1084,6 +1235,13 @@ function playImpatientIdle() {
 }
 
 function playDozeIdle() {
+  if (canUseAnimation("sleepWake")) {
+    return playOnce("sleepWake", priority.randomIdle, null, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS
+    });
+  }
+
   if (canUseAnimation("doze")) {
     return playLoop("doze", priority.randomIdle, {
       anticipationMs: 0,
@@ -1104,6 +1262,182 @@ function playDozeIdle() {
   );
 }
 
+function playMouseProximityLook(direction) {
+  if (chatBubbleOpen || quietMode || pointerDown || dragging) return false;
+  if (active.name !== "idle" || active.priority !== priority.idle) return false;
+  if (Date.now() < blockIdleUntil || Date.now() < nextAmbientAllowedAt) return false;
+
+  if (canUseAnimation("proximityLook")) {
+    const playedAction = playOnce("proximityLook", priority.randomIdle, null, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS
+    });
+    if (playedAction) blockIdleUntil = Date.now() + POST_ACTION_IDLE_DELAY_MS;
+    return playedAction;
+  }
+
+  const side = direction === "left" ? -1 : direction === "right" ? 1 : 0;
+  const played = playFrames(
+    "idle",
+    [
+      { frame: 1, duration: 220 },
+      { frame: 0, duration: PROXIMITY_LOOK_DURATION_MS }
+    ],
+    priority.randomIdle,
+    null,
+    {
+      anticipationMs: 0,
+      recoveryMs: 100,
+      onStart: () => {
+        animateSpriteTransform([
+          { x: side * 2, y: 0, rotate: side * 1.5, duration: 180 },
+          { x: side * 2, y: 0, rotate: side * 1.5, duration: PROXIMITY_LOOK_DURATION_MS },
+          { x: 0, y: 0, rotate: 0, duration: 120 }
+        ]);
+      }
+    }
+  );
+
+  if (played) {
+    blockIdleUntil = Date.now() + POST_ACTION_IDLE_DELAY_MS;
+  }
+  return played;
+}
+
+function playBottomEdgeSit() {
+  if (canUseAnimation("bottomSit")) {
+    return playOnce("bottomSit", priority.singleClick, null, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS,
+      squashOnRecovery: true,
+      squashOptions: { scaleX: 1.04, scaleY: 0.96, durationMs: 100 }
+    });
+  }
+
+  if (canUseAnimation("lazySit")) {
+    return playLoop("lazySit", priority.singleClick, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS,
+      durationMs: 1800
+    });
+  }
+
+  return playFrames(
+    "idle",
+    [
+      { frame: 1, duration: 260 },
+      { frame: 5, duration: 900 },
+      { frame: 0, duration: 0 }
+    ],
+    priority.singleClick,
+    null,
+    {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS,
+      squashOnRecovery: true,
+      squashOptions: { scaleX: 1.04, scaleY: 0.96, durationMs: 100 }
+    }
+  );
+}
+
+function playEdgeReaction(edge) {
+  if (chatBubbleOpen || pointerDown || dragging) return false;
+
+  blockIdleUntil = Date.now() + EDGE_REACTION_IDLE_BLOCK_MS;
+  nextAmbientAllowedAt = Math.max(nextAmbientAllowedAt, Date.now() + EDGE_REACTION_IDLE_BLOCK_MS);
+
+  if (edge === "bottom") return playBottomEdgeSit();
+
+  if (edge === "top") {
+    if (canUseAnimation("edgePeek")) {
+      return playOnce("edgePeek", priority.singleClick, null, {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS
+      });
+    }
+
+    return playFrames(
+      "waiting",
+      [
+        { frame: 0, duration: 160 },
+        { frame: 1, duration: 160 },
+        { frame: 2, duration: 200 },
+        { frame: 0, duration: 0 }
+      ],
+      priority.singleClick,
+      null,
+      {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS,
+        onStart: () => animateSpriteTransform([
+          { x: -2, y: -2, rotate: -2, duration: 120 },
+          { x: 2, y: -2, rotate: 2, duration: 120 },
+          { x: 0, y: 0, rotate: 0, duration: 120 }
+        ])
+      }
+    );
+  }
+
+  if (edge === "left") {
+    if (canUseAnimation("edgePeek")) {
+      return playOnce("edgePeek", priority.singleClick, null, {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS
+      });
+    }
+
+    return playFrames(
+      "idle",
+      [
+        { frame: 1, duration: 180 },
+        { frame: 2, duration: 180 },
+        { frame: 0, duration: 0 }
+      ],
+      priority.singleClick,
+      null,
+      {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS,
+        onStart: () => animateSpriteTransform([
+          { x: 3, y: 0, rotate: 2, duration: 160 },
+          { x: 3, y: 0, rotate: 2, duration: 260 },
+          { x: 0, y: 0, rotate: 0, duration: 120 }
+        ])
+      }
+    );
+  }
+
+  if (edge === "right") {
+    if (canUseAnimation("edgePeek")) {
+      return playOnce("edgePeek", priority.singleClick, null, {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS
+      });
+    }
+
+    return playFrames(
+      "idle",
+      [
+        { frame: 1, duration: 180 },
+        { frame: 0, duration: 260 }
+      ],
+      priority.singleClick,
+      null,
+      {
+        anticipationMs: 0,
+        recoveryMs: ACTION_RECOVERY_MS,
+        onStart: () => animateSpriteTransform([
+          { x: -3, y: 0, rotate: -2, duration: 160 },
+          { x: -3, y: 0, rotate: -2, duration: 260 },
+          { x: 0, y: 0, rotate: 0, duration: 120 }
+        ])
+      }
+    );
+  }
+
+  return false;
+}
+
 function playJump(nextPriority = priority.jump) {
   return playOnce("jumping", nextPriority, null, {
     anticipationMs: JUMP_ANTICIPATION_MS,
@@ -1116,12 +1450,19 @@ function playJump(nextPriority = priority.jump) {
 }
 
 function playFailed(nextPriority = priority.failed) {
-  recentClicks = [];
+  clearClickCounters();
   clearTimeout(clickTimer);
   return playOnce("failed", nextPriority);
 }
 
 function playPokeAnnoyed() {
+  if (canUseAnimation("pokeFuss")) {
+    return playOnce("pokeFuss", priority.singleClick, null, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS
+    });
+  }
+
   if (canUseAnimation("pokeAnnoyed")) {
     return playOnce("pokeAnnoyed", priority.singleClick, null, {
       anticipationMs: 0,
@@ -1309,20 +1650,88 @@ function finishDragWithDrop() {
   );
 }
 
-function handleRapidClick() {
+function getPointerZone(event) {
+  const rect = pet.getBoundingClientRect();
+  const x = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+  const y = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5;
+
+  if (
+    y >= HEAD_HIT_ZONE_TOP &&
+    y <= HEAD_HIT_ZONE_BOTTOM &&
+    x >= HEAD_HIT_ZONE_LEFT &&
+    x <= HEAD_HIT_ZONE_RIGHT
+  ) {
+    return "head";
+  }
+
+  return "body";
+}
+
+function pruneRecentClicks(now) {
+  recentClicks = recentClicks.filter((entry) => now - entry.time <= RAPID_CLICK_WINDOW_MS);
+  recentHeadClicks = recentHeadClicks.filter((time) => now - time <= RAPID_CLICK_WINDOW_MS);
+}
+
+function clearClickCounters() {
+  recentClicks = [];
+  recentHeadClicks = [];
+}
+
+function playHeadPatFeedback() {
+  if (canUseAnimation("headPat")) {
+    const playedAction = playOnce("headPat", priority.singleClick, null, {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS
+    });
+    if (playedAction) {
+      showSpeech("headPat");
+      updateEmotion(4, 2);
+    }
+    return playedAction;
+  }
+
+  const played = playFrames(
+    "idle",
+    [
+      { frame: 1, duration: 120 },
+      { frame: 2, duration: 120 },
+      { frame: 3, duration: 120 },
+      { frame: 0, duration: 0 }
+    ],
+    priority.singleClick,
+    null,
+    {
+      anticipationMs: 0,
+      recoveryMs: ACTION_RECOVERY_MS
+    }
+  );
+
+  if (played) {
+    showSpeech("headPat");
+    updateEmotion(4, 2);
+  }
+  return played;
+}
+
+function handleRapidClick(zone) {
   const now = Date.now();
-  recentClicks = recentClicks.filter((time) => now - time <= RAPID_CLICK_WINDOW_MS);
-  recentClicks.push(now);
+  pruneRecentClicks(now);
+  recentClicks.push({ time: now, zone });
+  if (zone === "head") recentHeadClicks.push(now);
 
   if (recentClicks.length >= RAPID_CLICK_COUNT) {
     debugLog("rapid click → failed");
-    recentClicks = [];
+    clearClickCounters();
     clearTimeout(dblClickTimer);
     if (playFailed(priority.failed)) { showSpeech("annoyed"); updateEmotion(-15, -5); }
     return "failed";
   }
 
-  return recentClicks.length >= 2 ? "poke" : "single";
+  if (recentClicks.length >= 2) {
+    return recentHeadClicks.length >= 2 ? "headPoke" : "poke";
+  }
+
+  return zone === "head" ? "headSingle" : "single";
 }
 
 function startDragging(event) {
@@ -1421,20 +1830,34 @@ pet.addEventListener("pointerup", (event) => {
   }
 });
 
-pet.addEventListener("click", () => {
+pet.addEventListener("click", (event) => {
   if (suppressNextClick || didDrag || Date.now() < suppressClickUntil) {
     debugLog("click suppressed");
     suppressNextClick = false;
     return;
   }
 
-  const clickKind = handleRapidClick();
+  const clickZone = getPointerZone(event);
+  const clickKind = handleRapidClick(clickZone);
   if (clickKind === "failed") return;
 
   clearTimeout(clickTimer);
   clickTimer = setTimeout(() => {
-    if (clickKind === "poke") {
+    blockIdleUntil = Date.now() + RANDOM_IDLE_AFTER_ACTION_MS;
+
+    if (clickKind === "headPoke") {
       if (playPokeAnnoyed()) showSpeech("poke");
+      return;
+    }
+
+    if (clickKind === "poke") {
+      showSpeech("poke");
+      updateEmotion(-2, 0);
+      return;
+    }
+
+    if (clickKind === "headSingle") {
+      playHeadPatFeedback();
       return;
     }
 
@@ -1452,7 +1875,7 @@ pet.addEventListener("dblclick", () => {
   clearTimeout(dblClickTimer);
   dblClickTimer = setTimeout(() => {
     if (Date.now() < suppressClickUntil || dragging || didDrag) return;
-    recentClicks = [];
+    clearClickCounters();
     playJump(priority.jump);
   }, CLICK_DELAY_MS);
 });
@@ -1490,6 +1913,14 @@ ipcRenderer.on("window-motion-ended", () => {
   }
 });
 
+ipcRenderer.on("mouse-proximity-attention", (_event, data) => {
+  playMouseProximityLook(data?.direction);
+});
+
+ipcRenderer.on("drag-edge-interaction", (_event, data) => {
+  playEdgeReaction(data?.edge);
+});
+
 ipcRenderer.on("chat-thinking", () => {
   if (!chatBubbleOpen) return;
   // Stay neutral idle during thinking, no animation
@@ -1497,7 +1928,9 @@ ipcRenderer.on("chat-thinking", () => {
 
 ipcRenderer.on("chat-replied", () => {
   if (!chatBubbleOpen) return;
-  playOnce("review", priority.chatAction);
+  if (!playOnce("happyNod", priority.chatAction)) {
+    playOnce("review", priority.chatAction);
+  }
   updateEmotion(2, 1);
 });
 
@@ -1582,6 +2015,7 @@ function applySettings(nextSettings) {
   randomWalkEnabled = quietMode ? false : Boolean(nextSettings?.randomWalkEnabled);
   randomIdleEnabled = quietMode ? false : (nextSettings?.randomIdleEnabled !== false);
   speechBubbleEnabled = nextSettings?.speechBubbleEnabled !== false;
+  resourceDockEnabled = nextSettings?.resourceDockEnabled !== false;
 
   const blinkTiming = BLINK_MODE_MAP[nextSettings?.blinkMode ?? "normal"];
   idleBlinkMinMs = blinkTiming.min;
@@ -1591,6 +2025,7 @@ function applySettings(nextSettings) {
 
   document.documentElement.style.setProperty("--pet-scale", petScale);
   updateSpriteSheetBackgroundSize();
+  syncResourceDock();
 }
 
 async function saveRuntimeSettings() {

@@ -18,6 +18,16 @@ body {
   transform: translateZ(0);
 }
 
+#pet-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 #pet {
   width: calc(192px * var(--pet-scale));
   height: calc(208px * var(--pet-scale));
@@ -43,4 +53,65 @@ body {
 
 #pet.no-transform-transition {
   transition: none;
+}
+
+#resource-dock {
+  box-sizing: border-box;
+  width: min(176px, calc(100vw - 8px));
+  height: 68px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 18, 24, 0.76);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  color: #f8fafc;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+
+#resource-dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(88, 195, 165, 0.16), rgba(248, 250, 252, 0.04) 48%, rgba(96, 165, 250, 0.12));
+  pointer-events: none;
+}
+
+#resource-dock.is-hidden {
+  display: none;
+}
+
+.resource-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px 42px 1fr;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.resource-row span {
+  color: rgba(226, 232, 240, 0.64);
+  font-weight: 700;
+}
+
+.resource-row strong {
+  color: rgba(248, 250, 252, 0.92);
+  font-size: 10px;
+  text-align: right;
+}
+
+.resource-row i {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, var(--bar-color, #58c3a5) var(--bar-value, 0%), rgba(255,255,255,0.12) var(--bar-value, 0%));
 }

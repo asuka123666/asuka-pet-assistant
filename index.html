@@ -7,7 +7,26 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div id="pet" aria-label="desktop pet"></div>
+  <main id="pet-shell">
+    <div id="pet" aria-label="desktop pet"></div>
+    <section id="resource-dock" aria-label="system resources">
+      <div class="resource-row">
+        <span>CPU</span>
+        <strong id="resource-cpu">--%</strong>
+        <i id="resource-cpu-bar"></i>
+      </div>
+      <div class="resource-row">
+        <span>MEM</span>
+        <strong id="resource-mem">--%</strong>
+        <i id="resource-mem-bar"></i>
+      </div>
+      <div class="resource-row">
+        <span>DSK</span>
+        <strong id="resource-disk">--%</strong>
+        <i id="resource-disk-bar"></i>
+      </div>
+    </section>
+  </main>
   <script src="./renderer.js"></script>
 </body>
 </html>

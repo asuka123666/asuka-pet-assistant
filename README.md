@@ -4,7 +4,7 @@ Windows desktop pet preview built with Electron.
 
 ## Current Version
 
-`v0.3.0 Preview`
+`v0.4.0 Preview`
 
 ## Features
 
@@ -16,6 +16,9 @@ Windows desktop pet preview built with Electron.
 - Settings persistence with JSON storage
 - Optional AI chat through user-configured API settings
 - Speech bubbles, time-aware lines, and simple reminders
+- Embedded CPU, memory, and disk usage card under the desktop pet
+- Resource pressure can affect the pet mood and trigger occasional reminders
+- Resource card can be toggled from Settings or the tray menu
 - Windows portable executable build
 
 ## Development
@@ -49,7 +52,7 @@ npm run build
 The current preview package is organized under:
 
 ```text
-release/Asuka Pet Assistant v0.3.0 Preview/
+release/Asuka Pet Assistant v0.4.0 Preview/
 ```
 
 The packaged executable is ignored by Git and should be uploaded as a GitHub Release asset instead of committed to the repository.

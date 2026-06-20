@@ -5,6 +5,8 @@ const path = require("path");
 const PET_SCALE = 0.6;
 const BASE_WIDTH = 192;
 const BASE_HEIGHT = 208;
+const RESOURCE_DOCK_WIDTH = 176;
+const RESOURCE_DOCK_HEIGHT = 74;
 const JUMP_HEIGHT = 48;
 const JUMP_DURATION = 520;
 const JUMP_HEIGHT_MAP = { low: 32, normal: 48, high: 64 };
@@ -16,6 +18,11 @@ const WALK_DURATION = 1200;
 const STATUS_BUBBLE_DURATION_MS = 1000;
 const SPEECH_BUBBLE_DURATION_MS = 1800;
 const DEBUG_CHAT_WINDOW = false;
+const MOUSE_PROXIMITY_RADIUS = 90;
+const MOUSE_PROXIMITY_DWELL_MS = 2000;
+const MOUSE_PROXIMITY_COOLDOWN_MS = 9000;
+const MOUSE_PROXIMITY_POLL_MS = 250;
+const EDGE_REACTION_THRESHOLD = 42;
 const FALLBACK_TRAY_ICON =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABZElEQVR4nOWXsWvCQBTGv3tJSi/SToJDFmkK7g5OgmJ2nfwHHfXPEMHFzUGh4tDZoR0aaAtXUmxo05zeJXc10G+7cO++H+8lefeA/y5WJEgI8SA9kLF7KwDihGkZGFbEfNdqhbK94Xa704FgqsanTFVgZCBkyzwbJysh2TJXhSDVYFMQZwHEkVIWdDse4269hlOvF4LIZoF0zBP5gwGeJhP4vZ4WgAyCdA5gnIM4x/Nshlq/DxMinc1+t4uX+Rxv+z3cIADzPHMAQiH9tSjCzXCIYDqF22jgutMpXQZXOdJx4DWbeByN0mwkZYgXC/xJCXi7jdfNJl3Hq9UnRFmR6kY/ihAvl+laxDHeDwdcheV+FUznHTClrx6R9Aetr8CGqDIA7Ngus/3cZvp/AFxKVCkAZrkM2fT/ArAJkWeeC5AXZMo8T5T38DtlWYhzF1OSBZqAULkVs0rPBZWZjJCRydnw4voA2xKvHGRMmB8AAAAASUVORK5CYII=";
 
@@ -53,14 +60,18 @@ let tray = null;
 let statusTimer = null;
 let dragState = null;
 let motionFrame = null;
+let proximityTimer = null;
+let proximityCandidate = null;
+let lastProximityReactionAt = 0;
+let pendingEdgeInteraction = null;
 let settings = null;
 const reminderTimers = new Set();
 
 function createWindow() {
   settings = loadSettings();
   applyStartupSetting();
-  const width = Math.round(BASE_WIDTH * settings.petScale);
-  const height = Math.round(BASE_HEIGHT * settings.petScale);
+  const width = getMainWindowWidth(settings);
+  const height = getMainWindowHeight(settings);
   const position = settings.windowPosition
     ? clampPositionToScreen(settings.windowPosition.x, settings.windowPosition.y, width, height)
     : null;
@@ -92,6 +103,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "index.html"));
   createTray();
   startTimeAwareness();
+  startMouseProximityWatcher();
   registerGlobalShortcuts();
   mainWindow.on("close", () => {
     saveCurrentWindowPosition();
@@ -119,6 +131,7 @@ app.whenReady().then(createWindow);
 
 app.on("before-quit", () => {
   globalShortcut.unregisterAll();
+  stopMouseProximityWatcher();
   stopTimeAwareness();
   saveCurrentWindowPosition();
   saveSettings();
@@ -179,6 +192,7 @@ ipcMain.on("drag-end", () => {
     height: currentBounds.height
   });
 
+  pendingEdgeInteraction = getEdgeInteraction(settledBounds);
   dragState = null;
   animateRelease(currentBounds, settledBounds, RELEASE_BOUNCE_HEIGHT, RELEASE_BOUNCE_DURATION_MS);
 });
@@ -531,13 +545,13 @@ ipcMain.on("settings-change", (_event, { key, value }) => {
   saveSettings();
   sendSettingsToRenderer();
   updateTrayMenu();
-  if (key === "petScale") resizeMainWindow();
+  if (key === "petScale" || key === "resourceDockEnabled") resizeMainWindow();
 });
 
 ipcMain.on("reset-position", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const width = Math.round(BASE_WIDTH * (settings?.petScale ?? PET_SCALE));
-  const height = Math.round(BASE_HEIGHT * (settings?.petScale ?? PET_SCALE));
+  const width = getMainWindowWidth(settings ?? getDefaultSettings());
+  const height = getMainWindowHeight(settings ?? getDefaultSettings());
   const primary = screen.getPrimaryDisplay().workArea;
   const x = primary.x + primary.width - width - 60;
   const y = primary.y + Math.round((primary.height - height) / 2);
@@ -674,6 +688,10 @@ function animateRelease(fromBounds, toBounds, height, duration) {
       saveSettings();
       repositionChatBubble();
       sendWindowMotionEnded("release");
+      if (pendingEdgeInteraction) {
+        mainWindow.webContents.send("drag-edge-interaction", pendingEdgeInteraction);
+        pendingEdgeInteraction = null;
+      }
     }
   });
 }
@@ -708,6 +726,72 @@ function animateWalk(distance) {
       sendWindowMotionEnded("walk");
     }
   });
+}
+
+function startMouseProximityWatcher() {
+  stopMouseProximityWatcher();
+  proximityTimer = setInterval(checkMouseProximity, MOUSE_PROXIMITY_POLL_MS);
+}
+
+function stopMouseProximityWatcher() {
+  if (proximityTimer) {
+    clearInterval(proximityTimer);
+    proximityTimer = null;
+  }
+  proximityCandidate = null;
+}
+
+function checkMouseProximity() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || dragState) {
+    proximityCandidate = null;
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastProximityReactionAt < MOUSE_PROXIMITY_COOLDOWN_MS) return;
+
+  const bounds = mainWindow.getBounds();
+  const point = screen.getCursorScreenPoint();
+  const expanded = {
+    left: bounds.x - MOUSE_PROXIMITY_RADIUS,
+    right: bounds.x + bounds.width + MOUSE_PROXIMITY_RADIUS,
+    top: bounds.y - MOUSE_PROXIMITY_RADIUS,
+    bottom: bounds.y + bounds.height + MOUSE_PROXIMITY_RADIUS
+  };
+  const insideExpanded = point.x >= expanded.left && point.x <= expanded.right && point.y >= expanded.top && point.y <= expanded.bottom;
+  const insidePet = point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height;
+
+  if (!insideExpanded || insidePet) {
+    proximityCandidate = null;
+    return;
+  }
+
+  const direction = point.x < bounds.x ? "left" : point.x > bounds.x + bounds.width ? "right" : point.y < bounds.y ? "top" : "bottom";
+  if (!proximityCandidate || proximityCandidate.direction !== direction) {
+    proximityCandidate = { direction, startedAt: now };
+    return;
+  }
+
+  if (now - proximityCandidate.startedAt >= MOUSE_PROXIMITY_DWELL_MS) {
+    lastProximityReactionAt = now;
+    proximityCandidate = null;
+    mainWindow.webContents.send("mouse-proximity-attention", { direction });
+  }
+}
+
+function getEdgeInteraction(bounds) {
+  const display = screen.getDisplayMatching(bounds);
+  const area = display.workArea;
+  const nearLeft = bounds.x <= area.x - bounds.width + EDGE_MARGIN + EDGE_REACTION_THRESHOLD;
+  const nearRight = bounds.x >= area.x + area.width - EDGE_MARGIN - EDGE_REACTION_THRESHOLD;
+  const nearTop = bounds.y <= area.y - bounds.height + EDGE_MARGIN + EDGE_REACTION_THRESHOLD;
+  const nearBottom = bounds.y >= area.y + area.height - EDGE_MARGIN - EDGE_REACTION_THRESHOLD;
+
+  if (nearTop) return { edge: "top" };
+  if (nearBottom) return { edge: "bottom" };
+  if (nearLeft) return { edge: "left" };
+  if (nearRight) return { edge: "right" };
+  return null;
 }
 
 function easeOutCubic(progress) {
@@ -904,11 +988,24 @@ function clearReminderTimers() {
   reminderTimers.clear();
 }
 
+function getMainWindowWidth(nextSettings = settings ?? getDefaultSettings()) {
+  const petWidth = Math.round(BASE_WIDTH * (nextSettings?.petScale ?? PET_SCALE));
+  return nextSettings?.resourceDockEnabled === false
+    ? petWidth
+    : Math.max(petWidth, RESOURCE_DOCK_WIDTH);
+}
+
+function getMainWindowHeight(nextSettings = settings ?? getDefaultSettings()) {
+  const petHeight = Math.round(BASE_HEIGHT * (nextSettings?.petScale ?? PET_SCALE));
+  return nextSettings?.resourceDockEnabled === false
+    ? petHeight
+    : petHeight + RESOURCE_DOCK_HEIGHT;
+}
+
 function resizeMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const scale = settings?.petScale ?? PET_SCALE;
-  const width = Math.round(BASE_WIDTH * scale);
-  const height = Math.round(BASE_HEIGHT * scale);
+  const width = getMainWindowWidth(settings ?? getDefaultSettings());
+  const height = getMainWindowHeight(settings ?? getDefaultSettings());
   const bounds = mainWindow.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const area = display.workArea;
@@ -1366,6 +1463,7 @@ function settingsHtml() {
       ${toggleRow("台词气泡", "speechBubbleEnabled", s.speechBubbleEnabled)}
       ${toggleRow("对话入口", "chatEnabled", s.chatEnabled)}
       ${toggleRow("桌面小组件", "widgetEnabled", s.widgetEnabled)}
+      ${toggleRow("资源状态卡", "resourceDockEnabled", s.resourceDockEnabled)}
     </div>
 
     <div class="divider"></div>
@@ -1615,6 +1713,7 @@ function updateTrayMenu() {
 
   const randomWalkLabel = settings?.randomWalkEnabled ? "随机走动：开" : "随机走动：关";
   const quietModeLabel = settings?.quietMode ? "安静模式：开" : "安静模式：关";
+  const resourceDockLabel = settings?.resourceDockEnabled !== false ? "资源状态卡：开" : "资源状态卡：关";
   const startupLabel = settings?.startupEnabled ? "开机启动：开" : "开机启动：关";
 
   const menu = Menu.buildFromTemplate([
@@ -1623,6 +1722,7 @@ function updateTrayMenu() {
     { type: "separator" },
     { label: randomWalkLabel, click: () => updateRuntimeSetting({ randomWalkEnabled: !settings.randomWalkEnabled, quietMode: false }, "Random Walk") },
     { label: quietModeLabel, click: () => updateRuntimeSetting({ quietMode: !settings.quietMode, randomWalkEnabled: settings.quietMode ? settings.randomWalkEnabled : false }, "Quiet Mode") },
+    { label: resourceDockLabel, click: () => updateRuntimeSetting({ resourceDockEnabled: settings.resourceDockEnabled === false }, "Resource Dock") },
     { label: startupLabel, click: toggleStartup },
     { type: "separator" },
     { label: "退出", click: cleanExit }
@@ -1659,6 +1759,10 @@ function updateRuntimeSetting(patch, label) {
 
   if (label === "Random Walk") showStatusBubble(`随机走动：${settings.randomWalkEnabled ? "开" : "关"}`);
   if (label === "Quiet Mode") showStatusBubble(`安静模式：${settings.quietMode ? "开" : "关"}`);
+  if (label === "Resource Dock") {
+    resizeMainWindow();
+    showStatusBubble(`资源状态卡：${settings.resourceDockEnabled !== false ? "开" : "关"}`);
+  }
 }
 
 function toggleStartup() {
@@ -2363,6 +2467,7 @@ function getDefaultSettings() {
     speechBubbleEnabled: true,
     chatEnabled: true,
     widgetEnabled: true,
+    resourceDockEnabled: true,
     emotion: { mood: 0, energy: 50 },
     apiSettings: {
       provider: "openai",
@@ -2423,6 +2528,7 @@ function normalizeSettings(value) {
     speechBubbleEnabled: value.speechBubbleEnabled !== false,
     chatEnabled: value.chatEnabled !== false,
     widgetEnabled: value.widgetEnabled !== false,
+    resourceDockEnabled: value.resourceDockEnabled !== false,
     emotion: normalizeEmotion(value.emotion, defaults.emotion),
     apiSettings: normalizeApiSettings(value.apiSettings, defaults.apiSettings)
   };

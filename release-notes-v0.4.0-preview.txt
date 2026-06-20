@@ -1,0 +1,27 @@
+Asuka Pet Assistant v0.4.0 Preview
+
+This preview focuses on making the desktop pet more useful during daily use.
+
+New:
+- Embedded CPU, memory, and system disk usage display directly under the pet.
+- Added compact animated usage bars with green, yellow, and red pressure states.
+- Added resource pressure dialogue so the pet reacts when the computer is heavily loaded.
+- Added Settings and tray menu toggles for the embedded resource card.
+- The pet window now resizes automatically when the resource card is enabled or disabled.
+
+Kept:
+- Transparent always-on-top desktop pet.
+- Click, double-click, drag, rapid-click, right-click menu, and tray controls.
+- AI chat entry, reminders, time-aware lines, speech bubbles, and persistent settings.
+- Windows portable executable build flow.
+
+Recommended test:
+- Launch the app and confirm the resource card appears below the pet.
+- Confirm CPU, MEM, and DSK values update.
+- Toggle the resource card in Settings and from the tray icon.
+- Check that normal pet interactions still work after toggling.
+
+Known notes:
+- This is still a preview build.
+- AI chat requires user-configured API settings.
+- The resource card reads local system data only.
