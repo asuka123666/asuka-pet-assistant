@@ -3,12 +3,25 @@ const path = require("path");
 const zlib = require("zlib");
 
 const COLUMNS = 8;
-const ORIGINAL_ROWS = 9;
-const EXTENSION_ROWS = 7;
+const SOURCES = [
+  {
+    label: "Original 9-row sprite sheet",
+    file: "pet-spritesheet-original-9rows-backup.png",
+    rows: 9
+  },
+  {
+    label: "Collar-drag 7-row extension",
+    file: "pet-spritesheet-extension.png",
+    rows: 7
+  },
+  {
+    label: "Interaction 7-row extension",
+    file: "pet-spritesheet-extension-rows16-22.png",
+    rows: 7
+  }
+];
 
-const originalPath = path.join(__dirname, "pet-spritesheet.png");
-const extensionPath = path.join(__dirname, "pet-spritesheet-extension.png");
-const outputPath = path.join(__dirname, "pet-spritesheet-16rows.png");
+const outputPath = path.join(__dirname, "pet-spritesheet.png");
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -243,41 +256,45 @@ function copyRows(source, target, targetWidth, targetY) {
 }
 
 function main() {
-  assertFileExists(originalPath, "Original sprite sheet");
-  assertFileExists(extensionPath, "Extension sprite sheet");
+  const parsedSources = SOURCES.map((source) => {
+    const filePath = path.join(__dirname, source.file);
+    assertFileExists(filePath, source.label);
+    return { ...source, filePath, image: parsePng(filePath) };
+  });
 
-  const original = parsePng(originalPath);
-  const extension = parsePng(extensionPath);
-
-  if (original.width % COLUMNS !== 0) {
-    throw new Error(`Original width ${original.width} is not divisible by ${COLUMNS}.`);
-  }
-  if (original.height % ORIGINAL_ROWS !== 0) {
-    throw new Error(`Original height ${original.height} is not divisible by ${ORIGINAL_ROWS}.`);
+  const first = parsedSources[0].image;
+  if (first.width % COLUMNS !== 0) {
+    throw new Error(`Base width ${first.width} is not divisible by ${COLUMNS}.`);
   }
 
-  const frameWidth = original.width / COLUMNS;
-  const frameHeight = original.height / ORIGINAL_ROWS;
-  const expectedExtensionHeight = frameHeight * EXTENSION_ROWS;
+  const frameWidth = first.width / COLUMNS;
+  const frameHeight = first.height / parsedSources[0].rows;
 
-  if (extension.width !== original.width) {
-    throw new Error(`Extension width ${extension.width} does not match original width ${original.width}. Refusing to resize.`);
-  }
-  if (extension.height !== expectedExtensionHeight) {
-    throw new Error(`Extension height ${extension.height} is not ${EXTENSION_ROWS} rows (${expectedExtensionHeight}px). Refusing to resize.`);
+  for (const source of parsedSources) {
+    const expectedHeight = frameHeight * source.rows;
+    if (source.image.width !== first.width) {
+      throw new Error(`${source.label} width ${source.image.width} does not match base width ${first.width}.`);
+    }
+    if (source.image.height !== expectedHeight) {
+      throw new Error(`${source.label} expected ${source.rows} rows (${expectedHeight}px), got ${source.image.height}px.`);
+    }
   }
 
-  const finalWidth = original.width;
-  const finalHeight = original.height + extension.height;
+  const finalWidth = first.width;
+  const finalHeight = parsedSources.reduce((height, source) => height + source.image.height, 0);
   const merged = Buffer.alloc(finalWidth * finalHeight * 4, 0);
-  copyRows(original, merged, finalWidth, 0);
-  copyRows(extension, merged, finalWidth, original.height);
+  let targetY = 0;
+  for (const source of parsedSources) {
+    copyRows(source.image, merged, finalWidth, targetY);
+    targetY += source.image.height;
+  }
 
   fs.writeFileSync(outputPath, encodeRgbaPng(finalWidth, finalHeight, merged));
 
   console.log("Spritesheet merge complete.");
-  console.log(`Original image:  ${original.width}x${original.height}`);
-  console.log(`Extension image: ${extension.width}x${extension.height}`);
+  for (const source of parsedSources) {
+    console.log(`${source.label}: ${source.image.width}x${source.image.height}`);
+  }
   console.log(`Final image:     ${finalWidth}x${finalHeight}`);
   console.log(`Frame size:      ${frameWidth}x${frameHeight}`);
   console.log(`Total rows:      ${finalHeight / frameHeight}`);

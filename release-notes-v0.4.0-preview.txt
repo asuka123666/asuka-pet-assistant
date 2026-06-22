@@ -3,11 +3,14 @@ Asuka Pet Assistant v0.4.0 Preview
 This preview focuses on making the desktop pet more useful during daily use.
 
 New:
-- Embedded CPU, memory, and system disk usage display directly under the pet.
+- Reworked the resource usage display into a collapsible monitor tucked into the pet instead of a permanent card under it.
+- Added GPU usage to the CPU, memory, and system disk usage display.
+- Added animated liquid-style resource bubble controls for size, opacity, percent display, GPU monitoring, and pressure reminders.
 - Added compact animated usage bars with green, yellow, and red pressure states.
 - Added resource pressure dialogue so the pet reacts when the computer is heavily loaded.
 - Added Settings and tray menu toggles for the embedded resource card.
 - The pet window now resizes automatically when the resource card is enabled or disabled.
+- Activated new interaction sprite rows for head pats, poke reactions, proximity looks, edge peeks, bottom sitting, sleep wakeups, and happy nods.
 
 Kept:
 - Transparent always-on-top desktop pet.
@@ -20,6 +23,7 @@ Recommended test:
 - Confirm CPU, MEM, and DSK values update.
 - Toggle the resource card in Settings and from the tray icon.
 - Check that normal pet interactions still work after toggling.
+- Check the new interaction animations during head pats, pokes, proximity reactions, edge reactions, bottom sitting, sleep wakeups, and happy nods.
 
 Known notes:
 - This is still a preview build.

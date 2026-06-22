@@ -9,21 +9,32 @@
 <body>
   <main id="pet-shell">
     <div id="pet" aria-label="desktop pet"></div>
-    <section id="resource-dock" aria-label="system resources">
-      <div class="resource-row">
-        <span>CPU</span>
-        <strong id="resource-cpu">--%</strong>
-        <i id="resource-cpu-bar"></i>
-      </div>
-      <div class="resource-row">
-        <span>MEM</span>
-        <strong id="resource-mem">--%</strong>
-        <i id="resource-mem-bar"></i>
-      </div>
-      <div class="resource-row">
-        <span>DSK</span>
-        <strong id="resource-disk">--%</strong>
-        <i id="resource-disk-bar"></i>
+    <section id="resource-dock" class="is-collapsed" aria-label="system resources">
+      <button id="resource-toggle" type="button" aria-expanded="false" title="展开资源占用">
+        <span>SYS</span>
+        <strong id="resource-summary">--%</strong>
+      </button>
+      <div class="resource-panel">
+        <div class="resource-row">
+          <span>CPU</span>
+          <strong id="resource-cpu">--%</strong>
+          <i id="resource-cpu-bar"></i>
+        </div>
+        <div class="resource-row">
+          <span>MEM</span>
+          <strong id="resource-mem">--%</strong>
+          <i id="resource-mem-bar"></i>
+        </div>
+        <div class="resource-row">
+          <span>DSK</span>
+          <strong id="resource-disk">--%</strong>
+          <i id="resource-disk-bar"></i>
+        </div>
+        <div class="resource-row">
+          <span>GPU</span>
+          <strong id="resource-gpu">--%</strong>
+          <i id="resource-gpu-bar"></i>
+        </div>
       </div>
     </section>
   </main>

@@ -1,13 +1,16 @@
 $ProjectRoot = $PSScriptRoot
 $ShortcutName = "Asuka Pet Assistant"
-$TargetPath = Join-Path $ProjectRoot "start-pet.bat"
+$TargetPath = "wscript.exe"
+$TargetArgs = Join-Path $ProjectRoot "launch-hidden.vbs"
 $DesktopPath = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $DesktopPath "$ShortcutName.lnk"
 
 $Shell = New-Object -ComObject WScript.Shell
 $Shortcut = $Shell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = $TargetPath
+$Shortcut.Arguments = $TargetArgs
 $Shortcut.WorkingDirectory = $ProjectRoot
+$Shortcut.WindowStyle = 7
 $Shortcut.Description = "Launch Asuka Pet Assistant"
 
 $IconCandidates = @(

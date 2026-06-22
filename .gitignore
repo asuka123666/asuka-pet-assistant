@@ -16,6 +16,7 @@ pet-settings.json
 assets/archive/
 assets/generated/
 tools/archive/
+qa/
 
 # Office temporary files
 ~$*

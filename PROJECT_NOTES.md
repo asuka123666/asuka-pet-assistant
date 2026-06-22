@@ -26,17 +26,20 @@ Keep these files in the project root:
 - `pet-spritesheet-original-9rows-backup.png` is the original 9-row backup.
 - `pet-spritesheet-extension.png` is the 7-row extension used by `merge-spritesheet.js`.
 - `pet-spritesheet-16rows.png` is the merged 16-row output.
+- `pet-spritesheet-extension-rows16-22.png` is the 7-row interaction extension used by `merge-spritesheet.js`.
 
 Current expected dimensions:
 
 - Original backup: `1536x1872`
 - Extension: `1536x1456`
-- Active 16-row sheet: `1536x3328`
+- Interaction extension: `1536x1456`
+- Active 23-row sheet: `1536x4784`
+- Stable 16-row sheet: `1536x3328`
 - Frame size: `192x208`
 
 ## Sprite Tools
 
-- `merge-spritesheet.js` merges the original 9 rows and the 7-row extension.
+- `merge-spritesheet.js` merges the original 9 rows, the collar-drag 7-row extension, and the interaction 7-row extension into the active 23-row sheet.
 - `convert-equal-cells-extension.js` converts an 8x7 equal-cell source image into the required 7-row extension format.
 - `check-project.js` checks JavaScript syntax and required PNG dimensions.
 

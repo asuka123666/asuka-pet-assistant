@@ -14,13 +14,15 @@ const REQUIRED_FILES = [
   "package.json",
   "pet-spritesheet.png",
   "pet-spritesheet-extension.png",
+  "pet-spritesheet-extension-rows16-22.png",
   "pet-spritesheet-original-9rows-backup.png"
 ];
 
 const PNG_EXPECTATIONS = [
-  { file: "pet-spritesheet.png", width: 1536, height: 3328, label: "active 16-row sheet" },
+  { file: "pet-spritesheet.png", width: 1536, height: 4784, label: "active 23-row sheet" },
   { file: "pet-spritesheet-16rows.png", width: 1536, height: 3328, label: "generated 16-row sheet" },
   { file: "pet-spritesheet-extension.png", width: 1536, height: 1456, label: "7-row extension" },
+  { file: "pet-spritesheet-extension-rows16-22.png", width: 1536, height: 1456, label: "interaction 7-row extension" },
   { file: "pet-spritesheet-original-9rows-backup.png", width: 1536, height: 1872, label: "original 9-row backup" }
 ];
 

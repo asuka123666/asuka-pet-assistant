@@ -5,8 +5,9 @@ const path = require("path");
 const PET_SCALE = 0.6;
 const BASE_WIDTH = 192;
 const BASE_HEIGHT = 208;
-const RESOURCE_DOCK_WIDTH = 176;
-const RESOURCE_DOCK_HEIGHT = 74;
+const RESOURCE_DOCK_COMPACT_WIDTH = 28;
+const RESOURCE_DOCK_EXPANDED_WIDTH = 190;
+const RESOURCE_DOCK_EXPANDED_HEIGHT = 110;
 const JUMP_HEIGHT = 48;
 const JUMP_DURATION = 520;
 const JUMP_HEIGHT_MAP = { low: 32, normal: 48, high: 64 };
@@ -35,6 +36,7 @@ let speechBubbleWindow = null;
 let speechBubbleTimer = null;
 let chatBubbleWindow = null;
 let chatBubbleOpen = false;
+let chatHistory = [];
 let cachedEmotion = { mood: 0, energy: 50 };
 let widgetWindow = null;
 let widgetTimer = null;
@@ -52,6 +54,7 @@ const ASUKA_SYSTEM_PROMPT = `你是一个桌面宠物 AI 助手，性格参考"�
 const API_TIMEOUT_MS = 20000;
 const API_MAX_TOKENS = 300;
 const REPLY_MAX_CHARS = 240;
+const CHAT_HISTORY_MAX_MESSAGES = 10;
 const WEATHER_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const WEATHER_API_TIMEOUT_MS = 8000;
 const LATE_NIGHT_START = 0;
@@ -65,6 +68,7 @@ let proximityCandidate = null;
 let lastProximityReactionAt = 0;
 let pendingEdgeInteraction = null;
 let settings = null;
+let resourceDockExpanded = false;
 const reminderTimers = new Set();
 
 function createWindow() {
@@ -127,7 +131,17 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+const singleInstanceLock = app.requestSingleInstanceLock();
+
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showPet();
+  });
+
+  app.whenReady().then(createWindow);
+}
 
 app.on("before-quit", () => {
   globalShortcut.unregisterAll();
@@ -382,6 +396,14 @@ ipcMain.handle("chat-send", async (_event, userText) => {
     }
 
     const url = buildChatCompletionsUrl(api.baseUrl);
+    const trimmedText = String(userText || "").slice(0, 500);
+
+    // Build messages: system prompt + history + current user message
+    const messages = [
+      { role: "system", content: ASUKA_SYSTEM_PROMPT },
+      ...chatHistory,
+      { role: "user", content: trimmedText }
+    ];
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -394,10 +416,7 @@ ipcMain.handle("chat-send", async (_event, userText) => {
       },
       body: JSON.stringify({
         model: api.model,
-        messages: [
-          { role: "system", content: ASUKA_SYSTEM_PROMPT },
-          { role: "user", content: String(userText || "").slice(0, 500) }
-        ],
+        messages,
         temperature: 0.8,
         max_tokens: API_MAX_TOKENS,
         stream: false
@@ -437,6 +456,14 @@ ipcMain.handle("chat-send", async (_event, userText) => {
     let reply = result.reply;
     if (reply.length > REPLY_MAX_CHARS) {
       reply = reply.slice(0, REPLY_MAX_CHARS) + "……";
+    }
+
+    // Update conversation history
+    chatHistory.push({ role: "user", content: trimmedText });
+    chatHistory.push({ role: "assistant", content: reply });
+    // Trim to max messages
+    if (chatHistory.length > CHAT_HISTORY_MAX_MESSAGES) {
+      chatHistory = chatHistory.slice(chatHistory.length - CHAT_HISTORY_MAX_MESSAGES);
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -535,7 +562,14 @@ ipcMain.on("renderer-ready", () => {
 });
 
 ipcMain.on("settings-change", (_event, { key, value }) => {
-  settings = normalizeSettings({ ...(settings ?? getDefaultSettings()), [key]: value });
+  const patch = { [key]: value };
+  if (key === "resourceBubblePosition") {
+    patch.resourceBubbleCustomPosition = null;
+  }
+  settings = normalizeSettings({ ...(settings ?? getDefaultSettings()), ...patch });
+  if (key === "resourceDockEnabled" && settings.resourceDockEnabled === false) {
+    resourceDockExpanded = false;
+  }
   if (key === "chatEnabled" && settings.chatEnabled === false) {
     closeChatBubble();
   }
@@ -546,6 +580,11 @@ ipcMain.on("settings-change", (_event, { key, value }) => {
   sendSettingsToRenderer();
   updateTrayMenu();
   if (key === "petScale" || key === "resourceDockEnabled") resizeMainWindow();
+});
+
+ipcMain.on("resource-dock-expanded-change", (_event, expanded) => {
+  resourceDockExpanded = Boolean(expanded);
+  resizeMainWindow();
 });
 
 ipcMain.on("reset-position", () => {
@@ -992,14 +1031,14 @@ function getMainWindowWidth(nextSettings = settings ?? getDefaultSettings()) {
   const petWidth = Math.round(BASE_WIDTH * (nextSettings?.petScale ?? PET_SCALE));
   return nextSettings?.resourceDockEnabled === false
     ? petWidth
-    : Math.max(petWidth, RESOURCE_DOCK_WIDTH);
+    : Math.max(petWidth, resourceDockExpanded ? RESOURCE_DOCK_EXPANDED_WIDTH : RESOURCE_DOCK_COMPACT_WIDTH);
 }
 
 function getMainWindowHeight(nextSettings = settings ?? getDefaultSettings()) {
   const petHeight = Math.round(BASE_HEIGHT * (nextSettings?.petScale ?? PET_SCALE));
   return nextSettings?.resourceDockEnabled === false
     ? petHeight
-    : petHeight + RESOURCE_DOCK_HEIGHT;
+    : petHeight + (resourceDockExpanded ? RESOURCE_DOCK_EXPANDED_HEIGHT : 0);
 }
 
 function resizeMainWindow() {
@@ -1018,8 +1057,8 @@ function resizeMainWindow() {
 }
 
 function controlMenuHtml() {
-  const randomWalkState = settings?.randomWalkEnabled ? "?" : "?";
-  const quietModeState = settings?.quietMode ? "?" : "?";
+  const randomWalkState = settings?.randomWalkEnabled ? "开" : "关";
+  const quietModeState = settings?.quietMode ? "开" : "关";
   const randomWalkClass = settings?.randomWalkEnabled ? "enabled" : "";
   const quietModeClass = settings?.quietMode ? "enabled" : "";
 
@@ -1193,6 +1232,22 @@ function settingsHtml() {
     { label: "低", value: "low" },
     { label: "正常", value: "normal" },
     { label: "高", value: "high" }
+  ];
+  const resourceBubbleSizeOptions = [
+    { label: "小", value: "tiny" },
+    { label: "正常", value: "small" },
+    { label: "大", value: "normal" }
+  ];
+  const resourceBubbleOpacityOptions = [
+    { label: "低", value: "low" },
+    { label: "正常", value: "medium" },
+    { label: "高", value: "high" }
+  ];
+  const resourceBubblePositionOptions = [
+    { label: "右下", value: "bottom-right" },
+    { label: "左下", value: "bottom-left" },
+    { label: "右上", value: "top-right" },
+    { label: "左上", value: "top-left" }
   ];
 
   function optionGroup(name, options, currentValue) {
@@ -1463,7 +1518,34 @@ function settingsHtml() {
       ${toggleRow("台词气泡", "speechBubbleEnabled", s.speechBubbleEnabled)}
       ${toggleRow("对话入口", "chatEnabled", s.chatEnabled)}
       ${toggleRow("桌面小组件", "widgetEnabled", s.widgetEnabled)}
-      ${toggleRow("资源状态卡", "resourceDockEnabled", s.resourceDockEnabled)}
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <div class="section-title">资源小球</div>
+      ${toggleRow("显示小球", "resourceDockEnabled", s.resourceDockEnabled)}
+      ${toggleRow("GPU 监控", "resourceGpuEnabled", s.resourceGpuEnabled)}
+      ${toggleRow("显示百分比", "resourceBubbleShowPercent", s.resourceBubbleShowPercent)}
+      ${toggleRow("高占用提醒", "resourcePressureSpeechEnabled", s.resourcePressureSpeechEnabled)}
+      <div class="row">
+        <span class="label">小球大小</span>
+        <div class="btn-group">
+          ${optionGroup("resourceBubbleSize", resourceBubbleSizeOptions, s.resourceBubbleSize)}
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">液体透明度</span>
+        <div class="btn-group">
+          ${optionGroup("resourceBubbleOpacity", resourceBubbleOpacityOptions, s.resourceBubbleOpacity)}
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">小球位置</span>
+        <div class="btn-group">
+          ${optionGroup("resourceBubblePosition", resourceBubblePositionOptions, s.resourceBubblePosition)}
+        </div>
+      </div>
     </div>
 
     <div class="divider"></div>
@@ -1752,6 +1834,9 @@ function hidePet() {
 
 function updateRuntimeSetting(patch, label) {
   settings = normalizeSettings({ ...(settings ?? getDefaultSettings()), ...patch });
+  if (Object.hasOwn(patch, "resourceDockEnabled") && settings.resourceDockEnabled === false) {
+    resourceDockExpanded = false;
+  }
   saveSettings();
   applyStartupSetting();
   updateTrayMenu();
@@ -1801,7 +1886,7 @@ function showStatusBubble(text) {
   const display = screen.getDisplayMatching(petBounds);
   const area = display.workArea;
   const x = clamp(petBounds.x + Math.round(petBounds.width / 2) - Math.round(width / 2), area.x, area.x + area.width - width);
-  const y = clamp(petBounds.y - height - 8, area.y, area.y + area.height - height);
+  const y = clamp(petBounds.y - height - 2, area.y, area.y + area.height - height);
 
   statusWindow = new BrowserWindow({
     width,
@@ -1845,9 +1930,10 @@ function closeStatusBubble() {
 }
 
 function showSpeechBubble(text) {
-  if (!mainWindow || !text.trim()) return;
+  if (!mainWindow || mainWindow.isDestroyed() || !text.trim()) return;
 
-  closeSpeechBubble();
+  // Force close any existing speech bubble first
+  forceCloseSpeechBubble();
 
   const width = 180;
   const height = 32;
@@ -1855,11 +1941,11 @@ function showSpeechBubble(text) {
   const display = screen.getDisplayMatching(petBounds);
   const area = display.workArea;
   const x = clamp(petBounds.x + Math.round(petBounds.width / 2) - Math.round(width / 2), area.x, area.x + area.width - width);
-  let y = petBounds.y - height - 10;
-  if (y < area.y) y = petBounds.y + petBounds.height + 6;
+  let y = petBounds.y - height - 4;
+  if (y < area.y) y = petBounds.y + petBounds.height + 4;
   y = clamp(y, area.y, area.y + area.height - height);
 
-  speechBubbleWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width,
     height,
     x,
@@ -1879,24 +1965,62 @@ function showSpeechBubble(text) {
     }
   });
 
-  speechBubbleWindow.setIgnoreMouseEvents(true);
-  speechBubbleWindow.setAlwaysOnTop(true, "screen-saver");
-  speechBubbleWindow.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(speechBubbleHtml(text))}`);
-  speechBubbleWindow.on("closed", () => {
-    speechBubbleWindow = null;
+  win.setIgnoreMouseEvents(true);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(speechBubbleHtml(text))}`);
+
+  speechBubbleWindow = win;
+
+  win.on("closed", () => {
+    // Only null if this is still the current window
+    if (speechBubbleWindow === win) {
+      speechBubbleWindow = null;
+    }
+    if (speechBubbleTimer) {
+      clearTimeout(speechBubbleTimer);
+      speechBubbleTimer = null;
+    }
   });
 
-  speechBubbleTimer = setTimeout(closeSpeechBubble, SPEECH_BUBBLE_DURATION_MS);
+  // Auto-close timer
+  speechBubbleTimer = setTimeout(() => {
+    speechBubbleTimer = null;
+    closeSpeechBubble();
+  }, SPEECH_BUBBLE_DURATION_MS);
 }
 
 function closeSpeechBubble() {
-  clearTimeout(speechBubbleTimer);
-  speechBubbleTimer = null;
+  if (speechBubbleTimer) {
+    clearTimeout(speechBubbleTimer);
+    speechBubbleTimer = null;
+  }
 
-  if (speechBubbleWindow && !speechBubbleWindow.isDestroyed()) {
-    const win = speechBubbleWindow;
-    speechBubbleWindow = null;
-    win.close();
+  const win = speechBubbleWindow;
+  if (!win) return;
+
+  speechBubbleWindow = null;
+
+  try {
+    if (!win.isDestroyed()) {
+      win.destroy();
+    }
+  } catch {}
+}
+
+function forceCloseSpeechBubble() {
+  // Close any existing window, even if reference was lost
+  if (speechBubbleTimer) {
+    clearTimeout(speechBubbleTimer);
+    speechBubbleTimer = null;
+  }
+
+  const win = speechBubbleWindow;
+  speechBubbleWindow = null;
+
+  if (win) {
+    try {
+      if (!win.isDestroyed()) win.destroy();
+    } catch {}
   }
 }
 
@@ -2006,6 +2130,7 @@ function repositionChatBubble() {
 function closeChatBubble() {
   debugChatWindow("closeChatBubble");
   chatBubbleOpen = false;
+  chatHistory = [];
 
   if (chatBubbleWindow && !chatBubbleWindow.isDestroyed()) {
     const win = chatBubbleWindow;
@@ -2052,7 +2177,7 @@ function showWidget() {
   const display = screen.getDisplayMatching(petBounds);
   const area = display.workArea;
   const x = clamp(petBounds.x + Math.round(petBounds.width / 2) - Math.round(width / 2), area.x, area.x + area.width - width);
-  const y = clamp(petBounds.y - height - 42, area.y, area.y + area.height - height);
+  const y = clamp(petBounds.y - height - 18, area.y, area.y + area.height - height);
 
   widgetWindow = new BrowserWindow({
     width,
@@ -2125,7 +2250,7 @@ function repositionWidget() {
   const display = screen.getDisplayMatching(petBounds);
   const area = display.workArea;
   const x = clamp(petBounds.x + Math.round(petBounds.width / 2) - Math.round(width / 2), area.x, area.x + area.width - width);
-  const y = clamp(petBounds.y - height - 42, area.y, area.y + area.height - height);
+  const y = clamp(petBounds.y - height - 18, area.y, area.y + area.height - height);
   widgetWindow.setBounds({ x, y, width, height });
 }
 
@@ -2434,8 +2559,13 @@ function speechBubbleHtml(text) {
       background: rgba(20, 20, 20, 0.78);
       font-size: 12px;
       line-height: 1;
+      animation: speech-fade ${SPEECH_BUBBLE_DURATION_MS}ms ease-in forwards;
       white-space: nowrap;
       letter-spacing: 0.2px;
+    }
+    @keyframes speech-fade {
+      0%, 70% { opacity: 1; }
+      100% { opacity: 0; }
     }
   </style>
 </head>
@@ -2468,7 +2598,15 @@ function getDefaultSettings() {
     chatEnabled: true,
     widgetEnabled: true,
     resourceDockEnabled: true,
+    resourceGpuEnabled: true,
+    resourceBubbleShowPercent: true,
+    resourceBubbleSize: "small",
+    resourceBubbleOpacity: "medium",
+    resourceBubblePosition: "bottom-right",
+    resourceBubbleCustomPosition: null,
+    resourcePressureSpeechEnabled: true,
     emotion: { mood: 0, energy: 50 },
+    lastWeatherPhrase: null,
     apiSettings: {
       provider: "openai",
       baseUrl: "https://api.openai.com/v1",
@@ -2512,6 +2650,10 @@ function normalizeSettings(value) {
   const quietMode = Boolean(value.quietMode);
   const validBlinkModes = ["low", "normal", "high"];
   const validJumpModes = ["low", "normal", "high"];
+  const validResourceBubbleSizes = ["tiny", "small", "normal"];
+  const validResourceBubbleOpacities = ["low", "medium", "high"];
+  const validResourceBubblePositions = ["bottom-right", "bottom-left", "top-right", "top-left"];
+  const customBubblePosition = value.resourceBubbleCustomPosition;
 
   return {
     windowPosition:
@@ -2529,7 +2671,18 @@ function normalizeSettings(value) {
     chatEnabled: value.chatEnabled !== false,
     widgetEnabled: value.widgetEnabled !== false,
     resourceDockEnabled: value.resourceDockEnabled !== false,
+    resourceGpuEnabled: value.resourceGpuEnabled !== false,
+    resourceBubbleShowPercent: value.resourceBubbleShowPercent !== false,
+    resourceBubbleSize: validResourceBubbleSizes.includes(value.resourceBubbleSize) ? value.resourceBubbleSize : defaults.resourceBubbleSize,
+    resourceBubbleOpacity: validResourceBubbleOpacities.includes(value.resourceBubbleOpacity) ? value.resourceBubbleOpacity : defaults.resourceBubbleOpacity,
+    resourceBubblePosition: validResourceBubblePositions.includes(value.resourceBubblePosition) ? value.resourceBubblePosition : defaults.resourceBubblePosition,
+    resourceBubbleCustomPosition:
+      customBubblePosition && Number.isFinite(customBubblePosition.x) && Number.isFinite(customBubblePosition.y)
+        ? { x: Math.round(customBubblePosition.x), y: Math.round(customBubblePosition.y) }
+        : defaults.resourceBubbleCustomPosition,
+    resourcePressureSpeechEnabled: value.resourcePressureSpeechEnabled !== false,
     emotion: normalizeEmotion(value.emotion, defaults.emotion),
+    lastWeatherPhrase: typeof value.lastWeatherPhrase === "string" ? value.lastWeatherPhrase : null,
     apiSettings: normalizeApiSettings(value.apiSettings, defaults.apiSettings)
   };
 }
@@ -2648,7 +2801,7 @@ async function fetchWeather() {
   }
 }
 
-let lastWeatherPhrase = null;
+let lastWeatherPhrase = settings?.lastWeatherPhrase ?? null;
 
 async function updateTimeContext() {
   const timeCtx = getTimeContext();
@@ -2663,6 +2816,9 @@ async function updateTimeContext() {
   const phraseToSend = weatherPhrase || timeCtx.timePhrase;
   if (phraseToSend && phraseToSend !== lastWeatherPhrase) {
     lastWeatherPhrase = phraseToSend;
+    // Persist weather cache
+    settings = normalizeSettings({ ...(settings ?? getDefaultSettings()), lastWeatherPhrase });
+    saveSettings();
   } else if (phraseToSend === lastWeatherPhrase) {
     // Same phrase, only send time context without phrase
     if (mainWindow && !mainWindow.isDestroyed()) {

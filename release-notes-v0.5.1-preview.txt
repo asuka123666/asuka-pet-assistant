@@ -1,0 +1,30 @@
+Asuka Pet Assistant v0.5.1 Preview
+
+Date: 2026-06-21
+
+What changed:
+- Right-click menu toggles now show clear 开/关 state text for random walk and quiet mode.
+- The collapsed resource bubble can now be dragged to a custom spot and remembers that position.
+- Choosing a corner position in Settings clears the custom dragged position and returns to corner placement.
+- The liquid percentage fill now transitions more smoothly and has a softer wave motion.
+- Hovering the collapsed bubble gives a subtle response without adding a shadow or visible hard edge.
+- The expanded resource panel is tighter and less bulky.
+- The GPU row now distinguishes GPU type when available, shows VRAM percentage when Windows exposes it, and falls back quietly when GPU counters cannot be read.
+
+Still included:
+- Collapsible CPU, memory, disk, and GPU resource monitor.
+- Transparent liquid-style compact resource bubble.
+- Resource bubble settings for visibility, GPU, percent text, size, opacity, corner position, and high usage reminders.
+- Single-instance launch protection.
+- Desktop pet interactions, AI chat entry, reminders, tray controls, settings, and portable Windows build.
+
+Build output:
+dist/Asuka Pet Assistant-0.5.1-portable.exe
+
+Release folder:
+release/Asuka Pet Assistant v0.5.1 Preview/
+
+Notes:
+- This is still a preview build.
+- AI chat requires user-configured API settings.
+- GPU availability depends on Windows performance counters and the graphics driver.

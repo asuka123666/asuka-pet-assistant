@@ -1,6 +1,7 @@
 const { ipcRenderer } = require("electron");
 const fs = require("fs");
 const os = require("os");
+const { execFile } = require("child_process");
 
 const CELL_WIDTH = 192;
 const CELL_HEIGHT = 208;
@@ -32,7 +33,13 @@ const RANDOM_IDLE_MIN_MS = 45000;
 const RANDOM_IDLE_MAX_MS = 90000;
 const RANDOM_IDLE_AFTER_ACTION_MS = 10000;
 const RESOURCE_UPDATE_MS = 1200;
+const RESOURCE_UPDATE_MS_COLLAPSED = 3000;
+const GPU_UPDATE_MS_EXPANDED = 5000;
+const GPU_UPDATE_MS_COLLAPSED = 20000;
+const GPU_COUNTER_TIMEOUT_MS = 3500;
 const RESOURCE_PRESSURE_THRESHOLD = 88;
+const RESOURCE_BUBBLE_DRAG_THRESHOLD_PX = 4;
+const RESOURCE_BUBBLE_CLICK_SUPPRESS_MS = 220;
 const DISK_ROOT = process.platform === "win32" ? `${process.env.SystemDrive || "C:"}\\` : "/";
 
 const ENABLE_RANDOM_WALK_DEFAULT = false;
@@ -335,13 +342,13 @@ const animations = {
   doze: { row: -1, frames: 6, fps: 2.5, holdLastMs: 180, fallback: "dozeIdle" },
   pokeAnnoyed: { row: -1, frames: 4, fps: 6.25, holdLastMs: 140, fallback: "failed" },
   stretch: { row: -1, frames: 6, fps: 5.5, holdLastMs: 160, fallback: "stretchIdle" },
-  headPat: { row: 16, frames: 6, fps: 5.5, holdLastMs: 180, fallback: "idle" },
-  pokeFuss: { row: 17, frames: 6, fps: 6, holdLastMs: 220, fallback: "pokeAnnoyed" },
-  proximityLook: { row: 18, frames: 6, fps: 4.5, holdLastMs: 260, fallback: "idle" },
-  edgePeek: { row: 19, frames: 6, fps: 5, holdLastMs: 220, fallback: "waiting" },
-  bottomSit: { row: 20, frames: 6, fps: 4, holdLastMs: 500, fallback: "lazySit" },
+  headPat: { row: 16, frames: 8, fps: 5.5, holdLastMs: 180, fallback: "idle" },
+  pokeFuss: { row: 17, frames: 8, fps: 6, holdLastMs: 220, fallback: "pokeAnnoyed" },
+  proximityLook: { row: 18, frames: 8, fps: 4.5, holdLastMs: 260, fallback: "idle" },
+  edgePeek: { row: 19, frames: 8, fps: 5, holdLastMs: 220, fallback: "waiting" },
+  bottomSit: { row: 20, frames: 8, fps: 4, holdLastMs: 500, fallback: "lazySit" },
   sleepWake: { row: 21, frames: 8, fps: 3, holdLastMs: 240, fallback: "doze" },
-  happyNod: { row: 22, frames: 6, fps: 5, holdLastMs: 240, fallback: "review" }
+  happyNod: { row: 22, frames: 8, fps: 5, holdLastMs: 240, fallback: "review" }
 };
 
 const ACTION_VISUAL_SCALE = {
@@ -386,18 +393,28 @@ const priority = {
 
 const pet = document.getElementById("pet");
 const resourceDock = document.getElementById("resource-dock");
+const resourceToggle = document.getElementById("resource-toggle");
+const resourceSummary = document.getElementById("resource-summary");
 const resourceEls = {
   cpu: {
+    label: document.querySelector("#resource-cpu")?.parentElement?.querySelector("span"),
     value: document.getElementById("resource-cpu"),
     bar: document.getElementById("resource-cpu-bar")
   },
   mem: {
+    label: document.querySelector("#resource-mem")?.parentElement?.querySelector("span"),
     value: document.getElementById("resource-mem"),
     bar: document.getElementById("resource-mem-bar")
   },
   disk: {
+    label: document.querySelector("#resource-disk")?.parentElement?.querySelector("span"),
     value: document.getElementById("resource-disk"),
     bar: document.getElementById("resource-disk-bar")
+  },
+  gpu: {
+    label: document.querySelector("#resource-gpu")?.parentElement?.querySelector("span"),
+    value: document.getElementById("resource-gpu"),
+    bar: document.getElementById("resource-gpu-bar")
   }
 };
 
@@ -430,9 +447,31 @@ let randomWalkEnabled = ENABLE_RANDOM_WALK_DEFAULT;
 let randomIdleEnabled = false;
 let quietMode = false;
 let resourceDockEnabled = true;
+let resourceDockExpanded = false;
+let resourceGpuEnabled = true;
+let resourceBubbleShowPercent = true;
+let resourcePressureSpeechEnabled = true;
+let resourceBubbleSize = "small";
+let resourceBubbleOpacity = "medium";
+let resourceBubblePosition = "bottom-right";
+let resourceBubbleCustomPosition = null;
 let resourceTimer = null;
 let lastCpuSnapshot = getCpuSnapshot();
 let resourcePressureSpeechAt = 0;
+let lastGpuPercent = null;
+let lastGpuMemoryPercent = null;
+let lastGpuLabel = "gpu";
+let lastGpuName = "";
+let lastGpuSampleAt = 0;
+let gpuRequestInFlight = false;
+const resourceValues = { cpu: null, mem: null, disk: null, gpu: null };
+const RESOURCE_BUBBLE_SIZE_PX = { tiny: 22, small: 26, normal: 32 };
+const RESOURCE_BUBBLE_OPACITY = { low: 0.45, medium: 0.72, high: 0.92 };
+const RESOURCE_BUBBLE_POSITIONS = ["bottom-right", "bottom-left", "top-right", "top-left"];
+let resourceBubblePointerDown = false;
+let resourceBubbleDragging = false;
+let resourceBubbleDragStart = null;
+let resourceBubbleClickSuppressUntil = 0;
 
 let pointerDown = false;
 let dragging = false;
@@ -482,6 +521,88 @@ function getDiskPercent() {
   }
 }
 
+function getGpuStats() {
+  if (process.platform !== "win32") {
+    return Promise.resolve({ percent: null, memoryPercent: null, label: "gpu", name: "" });
+  }
+
+  const script = [
+    "$util = $null",
+    "try { $util = [math]::Round(((Get-Counter '\\GPU Engine(*)\\Utilization Percentage' -ErrorAction Stop).CounterSamples | Measure-Object -Property CookedValue -Sum).Sum, 0) } catch {}",
+    "$controllers = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name })",
+    "$names = @($controllers | ForEach-Object { $_.Name })",
+    "$nameText = ($names -join ' / ')",
+    "$type = if ($nameText -match 'NVIDIA|GeForce|RTX|GTX|AMD|Radeon|RX ') { 'dgpu' } elseif ($nameText -match 'Intel|Iris|UHD') { 'igpu' } else { 'gpu' }",
+    "$memory = $null",
+    "try {",
+    "  $usage = ((Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage' -ErrorAction Stop).CounterSamples | Measure-Object -Property CookedValue -Sum).Sum",
+    "  $total = (($controllers | Where-Object { $_.AdapterRAM -gt 0 } | Measure-Object -Property AdapterRAM -Sum).Sum)",
+    "  if ($usage -ge 0 -and $total -gt 0) { $memory = [math]::Round(($usage / $total) * 100, 0) }",
+    "} catch {}",
+    "[pscustomobject]@{ percent=$util; memoryPercent=$memory; label=$type; name=$nameText } | ConvertTo-Json -Compress"
+  ].join("; ");
+
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NoLogo", "-Command", script],
+      { encoding: "utf8", timeout: GPU_COUNTER_TIMEOUT_MS, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolve({ percent: null, memoryPercent: null, label: "gpu", name: "" });
+          return;
+        }
+
+        try {
+          const data = JSON.parse(String(stdout).trim());
+          const percent = Number(data?.percent);
+          const memoryPercent = Number(data?.memoryPercent);
+          resolve({
+            percent: Number.isFinite(percent) ? clampPercent(percent) : null,
+            memoryPercent: Number.isFinite(memoryPercent) ? clampPercent(memoryPercent) : null,
+            label: typeof data?.label === "string" && data.label ? data.label : "gpu",
+            name: typeof data?.name === "string" ? data.name : ""
+          });
+        } catch {
+          resolve({ percent: null, memoryPercent: null, label: "gpu", name: "" });
+        }
+      }
+    );
+  });
+}
+
+function refreshGpuPercent(force = false) {
+  if (!resourceGpuEnabled) {
+    lastGpuPercent = null;
+    lastGpuMemoryPercent = null;
+    lastGpuLabel = "gpu";
+    lastGpuName = "";
+    setResourceMetric("gpu", null);
+    updateResourceSummary();
+    return;
+  }
+
+  const now = Date.now();
+  const interval = resourceDockExpanded ? GPU_UPDATE_MS_EXPANDED : GPU_UPDATE_MS_COLLAPSED;
+  if (gpuRequestInFlight) return;
+  if (!force && now - lastGpuSampleAt < interval) return;
+
+  gpuRequestInFlight = true;
+  getGpuStats()
+    .then((stats) => {
+      lastGpuPercent = stats.percent;
+      lastGpuMemoryPercent = stats.memoryPercent;
+      lastGpuLabel = stats.label;
+      lastGpuName = stats.name;
+      lastGpuSampleAt = Date.now();
+      setResourceMetric("gpu", lastGpuPercent);
+      updateResourceSummary();
+    })
+    .finally(() => {
+      gpuRequestInFlight = false;
+    });
+}
+
 function clampPercent(value) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -497,9 +618,103 @@ function setResourceMetric(metric, value) {
   const target = resourceEls[metric];
   if (!target?.value || !target?.bar) return;
   const percent = value == null ? 0 : value;
-  target.value.textContent = value == null ? "--%" : `${value}%`;
+  resourceValues[metric] = value;
+  if (metric === "gpu") {
+    const gpuLabelMap = { dgpu: "独显", igpu: "核显", gpu: "GPU" };
+    const labelText = gpuLabelMap[lastGpuLabel] ?? "GPU";
+    const memoryText = lastGpuMemoryPercent == null ? "" : `/${lastGpuMemoryPercent}%`;
+    if (target.label) target.label.textContent = labelText;
+    target.value.textContent = value == null ? "静默" : `${value}%${memoryText}`;
+    target.value.title = [
+      lastGpuName || "GPU",
+      value == null ? "利用率未读取" : `利用率 ${value}%`,
+      lastGpuMemoryPercent == null ? null : `显存 ${lastGpuMemoryPercent}%`
+    ].filter(Boolean).join(" · ");
+  } else {
+    target.value.textContent = value == null ? "--%" : `${value}%`;
+  }
   target.bar.style.setProperty("--bar-value", `${percent}%`);
   target.bar.style.setProperty("--bar-color", resourceColor(value));
+}
+
+function getResourcePressure() {
+  return Math.max(
+    resourceValues.cpu ?? 0,
+    resourceValues.mem ?? 0,
+    resourceValues.disk ?? 0,
+    resourceValues.gpu ?? 0
+  );
+}
+
+function updateResourceSummary() {
+  if (!resourceSummary || !resourceToggle) return;
+  const pressure = getResourcePressure();
+  resourceSummary.textContent = resourceBubbleShowPercent
+    ? (pressure > 0 ? `${pressure}%` : "--%")
+    : "";
+  resourceToggle.style.setProperty("--bar-color", resourceColor(pressure > 0 ? pressure : null));
+  resourceToggle.style.setProperty("--bubble-fill", `${pressure}%`);
+}
+
+function clampResourceBubblePosition(position) {
+  if (!resourceDock || !position) return null;
+  const parent = resourceDock.offsetParent || resourceDock.parentElement;
+  if (!parent) return null;
+  const fallbackSize = RESOURCE_BUBBLE_SIZE_PX[resourceBubbleSize] ?? RESOURCE_BUBBLE_SIZE_PX.small;
+  const width = resourceDock.offsetWidth || fallbackSize;
+  const height = resourceDock.offsetHeight || fallbackSize;
+  const maxX = Math.max(0, parent.clientWidth - width);
+  const maxY = Math.max(0, parent.clientHeight - height);
+  return {
+    x: Math.round(Math.max(0, Math.min(maxX, position.x))),
+    y: Math.round(Math.max(0, Math.min(maxY, position.y)))
+  };
+}
+
+function applyResourceBubbleCustomPosition() {
+  if (!resourceDock) return;
+  const customPosition = resourceBubbleCustomPosition ? clampResourceBubblePosition(resourceBubbleCustomPosition) : null;
+  resourceDock.classList.toggle("position-custom", Boolean(customPosition));
+  if (customPosition) {
+    resourceDock.style.setProperty("--resource-bubble-x", `${customPosition.x}px`);
+    resourceDock.style.setProperty("--resource-bubble-y", `${customPosition.y}px`);
+  } else {
+    resourceDock.style.removeProperty("--resource-bubble-x");
+    resourceDock.style.removeProperty("--resource-bubble-y");
+  }
+}
+
+function getResourceBubbleCurrentPosition() {
+  if (!resourceDock) return null;
+  const parent = resourceDock.offsetParent || resourceDock.parentElement;
+  if (!parent) return null;
+  const dockRect = resourceDock.getBoundingClientRect();
+  const parentRect = parent.getBoundingClientRect();
+  return clampResourceBubblePosition({
+    x: dockRect.left - parentRect.left,
+    y: dockRect.top - parentRect.top
+  });
+}
+
+function applyResourceBubbleSettings() {
+  const size = RESOURCE_BUBBLE_SIZE_PX[resourceBubbleSize] ?? RESOURCE_BUBBLE_SIZE_PX.small;
+  const opacity = RESOURCE_BUBBLE_OPACITY[resourceBubbleOpacity] ?? RESOURCE_BUBBLE_OPACITY.medium;
+  document.documentElement.style.setProperty("--resource-bubble-size", `${size}px`);
+  document.documentElement.style.setProperty("--resource-bubble-opacity", String(opacity));
+  resourceDock?.classList.toggle("hide-percent", !resourceBubbleShowPercent);
+  for (const position of RESOURCE_BUBBLE_POSITIONS) {
+    resourceDock?.classList.toggle(`position-${position}`, position === resourceBubblePosition);
+  }
+  applyResourceBubbleCustomPosition();
+}
+
+function syncResourceDockLayout() {
+  if (!resourceDock) return;
+  resourceDock.classList.toggle("is-collapsed", !resourceDockExpanded);
+  resourceDock.classList.toggle("is-expanded", resourceDockExpanded);
+  applyResourceBubbleCustomPosition();
+  resourceToggle?.setAttribute("aria-expanded", String(resourceDockExpanded));
+  resourceToggle?.setAttribute("title", resourceDockExpanded ? "收起资源占用" : "展开资源占用");
 }
 
 function updateResourceDock() {
@@ -508,12 +723,28 @@ function updateResourceDock() {
   const cpu = getCpuPercent();
   const mem = getMemoryPercent();
   const disk = getDiskPercent();
-  setResourceMetric("cpu", cpu);
-  setResourceMetric("mem", mem);
-  setResourceMetric("disk", disk);
 
-  const pressure = Math.max(cpu ?? 0, mem ?? 0, disk ?? 0);
-  if (pressure >= RESOURCE_PRESSURE_THRESHOLD) {
+  // Always update internal values for pressure calculation
+  resourceValues.cpu = cpu;
+  resourceValues.mem = mem;
+  resourceValues.disk = disk;
+
+  // Only update DOM bars when expanded (skip expensive DOM writes when collapsed)
+  if (resourceDockExpanded) {
+    setResourceMetric("cpu", cpu);
+    setResourceMetric("mem", mem);
+    setResourceMetric("disk", disk);
+    setResourceMetric("gpu", lastGpuPercent);
+    refreshGpuPercent();
+  } else {
+    // Collapsed: only refresh GPU on its own slower schedule
+    refreshGpuPercent();
+  }
+
+  updateResourceSummary();
+
+  const pressure = getResourcePressure();
+  if (resourcePressureSpeechEnabled && pressure >= RESOURCE_PRESSURE_THRESHOLD) {
     mood = clampEmotion(mood - 1);
     energy = clampEmotion(energy - 1, 0, 100);
     if (Date.now() - resourcePressureSpeechAt > 30000) {
@@ -523,18 +754,137 @@ function updateResourceDock() {
   }
 }
 
+function scheduleResourceUpdate() {
+  if (resourceTimer) {
+    clearInterval(resourceTimer);
+    resourceTimer = null;
+  }
+  const interval = resourceDockExpanded ? RESOURCE_UPDATE_MS : RESOURCE_UPDATE_MS_COLLAPSED;
+  resourceTimer = setInterval(() => {
+    updateResourceDock();
+    // Re-schedule with potentially different interval if expanded state changed
+    const expectedInterval = resourceDockExpanded ? RESOURCE_UPDATE_MS : RESOURCE_UPDATE_MS_COLLAPSED;
+    if (expectedInterval !== interval) {
+      scheduleResourceUpdate();
+    }
+  }, interval);
+}
+
 function syncResourceDock() {
   if (!resourceDock) return;
+  if (!resourceDockEnabled) resourceDockExpanded = false;
   resourceDock.classList.toggle("is-hidden", !resourceDockEnabled);
+  syncResourceDockLayout();
   if (resourceDockEnabled && !resourceTimer) {
     lastCpuSnapshot = getCpuSnapshot();
     updateResourceDock();
-    resourceTimer = setInterval(updateResourceDock, RESOURCE_UPDATE_MS);
+    scheduleResourceUpdate();
   } else if (!resourceDockEnabled && resourceTimer) {
     clearInterval(resourceTimer);
     resourceTimer = null;
   }
 }
+
+function getResourceBubbleLocalPosition(event) {
+  if (!resourceDock) return null;
+  const parent = resourceDock.offsetParent || resourceDock.parentElement;
+  if (!parent) return null;
+  const parentRect = parent.getBoundingClientRect();
+  const size = RESOURCE_BUBBLE_SIZE_PX[resourceBubbleSize] ?? RESOURCE_BUBBLE_SIZE_PX.small;
+  return clampResourceBubblePosition({
+    x: event.clientX - parentRect.left - size / 2,
+    y: event.clientY - parentRect.top - size / 2
+  });
+}
+
+function saveResourceBubbleCustomPosition() {
+  if (!resourceBubbleCustomPosition) return;
+  ipcRenderer.invoke("update-settings", {
+    resourceBubbleCustomPosition
+  }).then((nextSettings) => {
+    resourceBubbleCustomPosition = nextSettings?.resourceBubbleCustomPosition ?? resourceBubbleCustomPosition;
+    applyResourceBubbleCustomPosition();
+  }).catch(() => {});
+}
+
+resourceDock?.addEventListener("pointerenter", () => {
+  resourceDock.classList.add("is-hovered");
+});
+
+resourceDock?.addEventListener("pointerleave", () => {
+  resourceDock.classList.remove("is-hovered");
+});
+
+resourceToggle?.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || resourceDockExpanded || !resourceDockEnabled) return;
+  event.stopPropagation();
+  resourceBubblePointerDown = true;
+  resourceBubbleDragging = false;
+  const startPosition = getResourceBubbleCurrentPosition() || getResourceBubbleLocalPosition(event);
+  resourceBubbleDragStart = {
+    screenX: event.screenX,
+    screenY: event.screenY,
+    x: startPosition?.x ?? 0,
+    y: startPosition?.y ?? 0
+  };
+  try {
+    resourceToggle.setPointerCapture(event.pointerId);
+  } catch {}
+});
+
+resourceToggle?.addEventListener("pointermove", (event) => {
+  if (!resourceBubblePointerDown || resourceDockExpanded || !resourceBubbleDragStart) return;
+  const dx = event.screenX - resourceBubbleDragStart.screenX;
+  const dy = event.screenY - resourceBubbleDragStart.screenY;
+  const distance = Math.hypot(dx, dy);
+  if (!resourceBubbleDragging && distance < RESOURCE_BUBBLE_DRAG_THRESHOLD_PX) return;
+  event.preventDefault();
+  event.stopPropagation();
+  resourceBubbleDragging = true;
+  resourceBubbleCustomPosition = clampResourceBubblePosition({
+    x: resourceBubbleDragStart.x + dx,
+    y: resourceBubbleDragStart.y + dy
+  });
+  applyResourceBubbleCustomPosition();
+});
+
+resourceToggle?.addEventListener("pointerup", (event) => {
+  if (!resourceBubblePointerDown) return;
+  resourceBubblePointerDown = false;
+  try {
+    resourceToggle.releasePointerCapture(event.pointerId);
+  } catch {}
+  if (resourceBubbleDragging) {
+    event.preventDefault();
+    event.stopPropagation();
+    resourceBubbleClickSuppressUntil = Date.now() + RESOURCE_BUBBLE_CLICK_SUPPRESS_MS;
+    resourceBubbleDragging = false;
+    saveResourceBubbleCustomPosition();
+  }
+  resourceBubbleDragStart = null;
+});
+
+resourceToggle?.addEventListener("pointercancel", () => {
+  resourceBubblePointerDown = false;
+  resourceBubbleDragging = false;
+  resourceBubbleDragStart = null;
+});
+
+resourceToggle?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (Date.now() < resourceBubbleClickSuppressUntil) {
+    event.preventDefault();
+    return;
+  }
+  resourceDockExpanded = !resourceDockExpanded;
+  syncResourceDockLayout();
+  scheduleResourceUpdate();
+  ipcRenderer.send("resource-dock-expanded-change", resourceDockExpanded);
+  if (resourceDockExpanded) {
+    refreshGpuPercent(true);
+    updateResourceDock();
+  }
+});
 
 function debugLog(...args) {
   if (DEBUG_STATE) console.log("[pet]", ...args);
@@ -2016,6 +2366,13 @@ function applySettings(nextSettings) {
   randomIdleEnabled = quietMode ? false : (nextSettings?.randomIdleEnabled !== false);
   speechBubbleEnabled = nextSettings?.speechBubbleEnabled !== false;
   resourceDockEnabled = nextSettings?.resourceDockEnabled !== false;
+  resourceGpuEnabled = nextSettings?.resourceGpuEnabled !== false;
+  resourceBubbleShowPercent = nextSettings?.resourceBubbleShowPercent !== false;
+  resourcePressureSpeechEnabled = nextSettings?.resourcePressureSpeechEnabled !== false;
+  resourceBubbleSize = nextSettings?.resourceBubbleSize ?? "small";
+  resourceBubbleOpacity = nextSettings?.resourceBubbleOpacity ?? "medium";
+  resourceBubblePosition = nextSettings?.resourceBubblePosition ?? "bottom-right";
+  resourceBubbleCustomPosition = nextSettings?.resourceBubbleCustomPosition ?? null;
 
   const blinkTiming = BLINK_MODE_MAP[nextSettings?.blinkMode ?? "normal"];
   idleBlinkMinMs = blinkTiming.min;
@@ -2024,6 +2381,15 @@ function applySettings(nextSettings) {
   applyEmotionToSettings(nextSettings?.emotion);
 
   document.documentElement.style.setProperty("--pet-scale", petScale);
+  applyResourceBubbleSettings();
+  if (!resourceGpuEnabled) {
+    lastGpuPercent = null;
+    lastGpuMemoryPercent = null;
+    lastGpuLabel = "gpu";
+    lastGpuName = "";
+    setResourceMetric("gpu", null);
+  }
+  updateResourceSummary();
   updateSpriteSheetBackgroundSize();
   syncResourceDock();
 }

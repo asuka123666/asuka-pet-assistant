@@ -1,0 +1,28 @@
+Asuka Pet Assistant v0.5.0 Preview
+
+This preview focuses on polishing the resource bubble and day-to-day launch behavior.
+
+New:
+- Added animated liquid movement inside the compact resource bubble.
+- Added smooth bubble-to-panel open and collapse transitions.
+- Added resource bubble settings for size, opacity, position, percent text, GPU monitoring, and high-usage reminders.
+- Reduced GPU polling frequency when the bubble is collapsed, while keeping faster updates when expanded.
+- Added single-instance launch protection so opening the shortcut again focuses the existing pet instead of starting a duplicate.
+- Reorganized Settings into clearer Display, Resource Bubble, Action, and API sections.
+
+Kept:
+- Transparent always-on-top desktop pet.
+- Click, double-click, drag, rapid-click, right-click menu, and tray controls.
+- AI chat entry, reminders, time-aware lines, speech bubbles, persistent settings, and portable build flow.
+- Activated 23-row sprite sheet with the newer interaction animations.
+
+Recommended test:
+- Open the desktop shortcut twice and confirm only one pet remains running.
+- Open Settings and adjust resource bubble size, opacity, position, percent text, GPU monitoring, and pressure reminders.
+- Expand the resource panel and confirm CPU, MEM, DSK, and GPU values update.
+- Check normal pet interactions after changing resource bubble settings.
+
+Known notes:
+- This is still a preview build.
+- AI chat requires user-configured API settings.
+- GPU usage is read through Windows performance counters and may show --% on unsupported systems.
