@@ -28,6 +28,7 @@
       "style.css",
       "pet-spritesheet.png",
       "icon.ico",
+      "templates/**",
       "package.json"
     ],
     "win": {

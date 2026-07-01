@@ -684,6 +684,17 @@ function applyResourceBubbleCustomPosition() {
   }
 }
 
+// Re-clamp custom position when container resizes
+const petShell = document.getElementById("pet-shell");
+if (petShell) {
+  const resizeObserver = new ResizeObserver(() => {
+    if (resourceBubbleCustomPosition) {
+      applyResourceBubbleCustomPosition();
+    }
+  });
+  resizeObserver.observe(petShell);
+}
+
 function getResourceBubbleCurrentPosition() {
   if (!resourceDock) return null;
   const parent = resourceDock.offsetParent || resourceDock.parentElement;
